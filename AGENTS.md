@@ -17,6 +17,11 @@
 
 Установка: `python -m pip install -e ".[test]"`.
 Основные проверки: `python -m pytest -q -m "not browser"`.
+Статические: `python -m pip install -e ".[test,lint]"`, затем `python -m mypy` и
+`python -m ruff check .` — оба обязаны быть чистыми. Покрытие с порогом:
+`python -m pytest -q -m "not browser" --cov` (порог 95% ветвей в pyproject,
+фактическое 97%). Не понижайте `fail_under` и не добавляйте игнорирование
+mypy/ruff без причины; вместо `# type: ignore` исправляйте тип или аннотацию.
 Браузер: `python -m pip install -e ".[test,browser]"`, затем
 `python -m playwright install chromium` и `python -m pytest tests/browser -q`.
 Отсутствующий Chromium при установленном Playwright — ошибка, не skip.

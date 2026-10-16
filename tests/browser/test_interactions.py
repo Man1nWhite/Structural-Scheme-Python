@@ -236,29 +236,37 @@ def test_preview_error_recovers_on_next_edit(page, live_url):
     expect(page.get_by_role('alert')).to_be_hidden()
 
 
-def test_late_preview_response_does_not_overwrite_new_edit(page, live_url):
+def test_new_edit_cancels_previous_preview_request(page, live_url):
+    """Устаревший запрос превью отменяется, а не просто игнорируется."""
+    page.add_init_script("""window.__aborted = 0;
+        const originalFetch = window.fetch;
+        window.fetch = (...args) => {
+          const signal = args[1] && args[1].signal;
+          if (signal) signal.addEventListener('abort', () => { window.__aborted++; });
+          return originalFetch(...args);
+        };""")
     start(page, live_url)
     held = []
 
     def hold_old_response(route):
         if route.request.post_data_json['project']['title'] == 'Старый ответ':
-            held.append((route, route.fetch()))
-            # Оставляем запрос незавершённым, пока новое превью не нарисовано.
+            held.append(route)
         else:
             route.continue_()
 
     page.route('**/api/preview', hold_old_response)
     with page.expect_request(lambda r: r.url.endswith('/api/preview')):
         page.get_by_label('Название схемы', exact=True).fill('Старый ответ')
+    assert page.evaluate('window.__aborted') == 0
     preview_change(page, lambda: page.get_by_label('Название схемы', exact=True).fill('Новый ответ'))
     expect(page.locator('#preview svg')).to_contain_text('Новый ответ')
+    # Отмена не показывается пользователю как ошибка построения.
+    expect(page.get_by_role('alert')).to_be_hidden()
+    expect(page.locator('#status')).not_to_contain_text('Ошибка')
+    assert page.evaluate('window.__aborted') >= 1
     assert len(held) == 1
-    route, response = held[0]
-    with page.expect_response(lambda r: r.url.endswith('/api/preview') and
-                              r.request.post_data_json['project']['title'] == 'Старый ответ'):
-        route.fulfill(response=response)
-    # Обрабатываем обещания fetch и следующий animation frame без sleep.
-    page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    held[0].abort()
+    # Ответ отменённого запроса не может перезаписать более новое редактирование.
     expect(page.locator('#preview svg')).to_contain_text('Новый ответ')
     expect(page.locator('#preview svg')).not_to_contain_text('Старый ответ')
 

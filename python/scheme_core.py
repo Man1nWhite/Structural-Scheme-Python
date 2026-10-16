@@ -8,6 +8,7 @@ import re
 from bisect import bisect_left, bisect_right, insort
 from collections import defaultdict
 from copy import deepcopy
+from typing import Any
 from uuid import uuid4
 
 BW, GAP_MIN, SLOT, SLOT_M, LSTEP, EXIT_STEP = 190, 30, 7, 8, 8, 20
@@ -34,7 +35,7 @@ PROJECT_DEFAULTS = dict(title='Структурная схема комплек�
     fileName='structural_scheme', operatorName='Операторная', serverName='Серверная',
     autoName='Помещение шкафов автоматики', blocksPerRow=4, showNotes=True,
     showSignalCounts=False, kvmPanel=False, kvmPanelName='Щит КВМ-удлинителей', notesText='')
-ITEM_DEFAULTS = {
+ITEM_DEFAULTS: dict[str, dict[str, Any]] = {
     'opItems': dict(id='', name='АРМ оператора', type='АРМ', link='Витая пара', target=None, kvmToPanel=False),
     'racks': dict(id='', name='Серверная стойка', servers=2, kvm=False, ntp=False, ups=True, netTarget=None),
     'netCabs': dict(id='', name='Шкаф сетевой', switches=2, fw=0, cross=1, external=False, ups=True),
@@ -45,13 +46,15 @@ ITEM_DEFAULTS = {
 
 class D(dict):
     """Словарь с доступом через точку, остаётся сериализуемым JSON."""
-    def __getattr__(self, key):
+
+    def __getattr__(self, key: str) -> Any:
         try:
             return self[key]
         except KeyError as e:
             raise AttributeError(key) from e
 
-    __setattr__ = dict.__setitem__
+    def __setattr__(self, key: str, value: Any) -> None:
+        self[key] = value
 
 
 def uid():
@@ -154,7 +157,7 @@ def newAutoCab(state):
 
 
 def createDefaultState():
-    s = {'project': deepcopy(PROJECT_DEFAULTS), **{k: [] for k in ITEM_DEFAULTS}}
+    s: dict[str, Any] = {'project': deepcopy(PROJECT_DEFAULTS), **{k: [] for k in ITEM_DEFAULTS}}
     s['netCabs'] = [{**newNetCab(s), 'fw': 1, 'cross': 2, 'external': True}]
     for name, kind, kvm in [('АРМ оператора №1', 'АРМ', True), ('АРМ оператора №2', 'АРМ', True),
                              ('Принтер сетевой', 'Принтер', False), ('Панель управления', 'Панель управления', False)]:
@@ -245,7 +248,7 @@ def routeBand(hs):
     """Граф «выше» и назначение горизонтальных каналов из backup."""
     for h in hs:
         h['track'] = -1
-    above = [set() for _ in hs]
+    above: list[set[int]] = [set() for _ in hs]
     for i, a in enumerate(hs):
         for j, b in enumerate(hs):
             if i == j:
@@ -290,7 +293,9 @@ def assign_gap_slots(runs):
     Интервалы замкнуты: касающиеся интервалы получают разные слоты.
     Сортировка по началу + очередь окончаний, не эвристика по длине.
     """
-    active, free, count = [], [], 0
+    active: list[tuple[float, int]] = []
+    free: list[int] = []
+    count = 0
     for i, r in sorted(enumerate(runs), key=lambda pair: (pair[1]['lo'], pair[1]['hi'], pair[0])):
         while active and active[0][0] < r['lo']:
             _, slot = heapq.heappop(active)
@@ -419,7 +424,7 @@ def layout(state, GAPX=GAP_MIN):
     # Непересекающиеся по Y линии переиспользуют координаты без сдвигов.
     # Реестр отсортирован по X, поэтому конфликты ищутся окном через bisect:
     # записи дальше spacing заведомо не могут нарушить разделение sep <= spacing.
-    occupied = []
+    occupied: list[tuple[float, float, float, float]] = []
 
     def conflicts_near(center, lo, hi, radius):
         i = bisect_left(occupied, (center-radius,))
@@ -636,7 +641,8 @@ def buildScheme(state):
     # Зазор между колонками ищется как неподвижная точка: требование при узком
     # зазоре завышено сдвинутыми обходами, поэтому одного роста недостаточно —
     # после стабилизации зазор возвращается к фактически необходимому.
-    gap, m, seen = GAP_MIN, None, []
+    gap, m = GAP_MIN, None
+    seen: list[float] = []
     for _ in range(32):
         m = layout(state, gap)
         want = max(GAP_MIN, m.needGap)

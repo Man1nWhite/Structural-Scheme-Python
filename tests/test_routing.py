@@ -123,8 +123,10 @@ def test_validator_detects_original_failure_modes():
           legend=D(x=0,y=80,w=100,h=20,items=[]), conns=[])
     endpoint = dict(id='other')
     m.conns = [dict(src=endpoint,tgt=endpoint,pts=[[0,30],[60,30]]),
-               dict(src=endpoint,tgt=endpoint,pts=[[10,30],[101,30]])]
+               dict(src=endpoint,tgt=endpoint,pts=[[10,30],[101,30]]),
+               dict(src=endpoint,tgt=endpoint,pts=[[5,50],[5,50.005],[15,50]])]
     p = layoutProblems(m)
     assert any('Наложение' in x for x in p)
     assert any('сквозь блок' in x for x in p)
     assert any('выходит за лист' in x for x in p)
+    assert any('Пустой отрезок' in x for x in p)

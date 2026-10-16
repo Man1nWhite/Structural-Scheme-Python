@@ -68,7 +68,7 @@ def layoutProblems(model):
                 problems.append(f'Наложение связей {owners[i]} и {owners[j]}: {overlap:.2f}px')
     # Порты одной грани не должны сливаться в одну вертикаль: вплоть до
     # подписей шаг ограничен шириной блока, но совпадение — уже ошибка.
-    ports = {}
+    ports: dict[tuple[str, str], list[float]] = {}
     for c in model['conns']:
         for block, edge, field in ((c.get('src'), c.get('sEdge'), 'sx'), (c.get('tgt'), c.get('tEdge'), 'tx')):
             if _has_box(block or {}) and edge in ('top', 'bottom') and field in c:

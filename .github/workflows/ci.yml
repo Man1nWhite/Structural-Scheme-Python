@@ -15,8 +15,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e ".[test,lint]"
-      - run: ruff check .
-      - run: python -m pytest -q -m "not browser"
+      - run: python -m ruff check .
+      - run: python -m mypy
+      - run: python -m pytest -q -m "not browser" --cov --cov-report=term-missing
 
   browser:
     runs-on: ubuntu-latest
