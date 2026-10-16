@@ -28,13 +28,13 @@ select = ["E4", "E7", "E9", "F", "W", "I"]
 "tests/*" = ["F403", "F405"]
 
 [tool.setuptools.packages.find]
-include = ["python*", "app*"]
+include = ["structural_scheme*"]
 
 [tool.setuptools.package-data]
-app = ["static/*"]
+structural_scheme = ["static/*"]
 
 [tool.mypy]
-files = ["python", "app", "generate.py"]
+files = ["structural_scheme", "generate.py"]
 # Проверяем тела функций без аннотаций: аннотировать каждую функцию не требуется,
 # но опечатки и несовместимые типы внутри ловятся.
 check_untyped_defs = true
@@ -49,7 +49,7 @@ module = ["shapely.*", "resvg_py.*", "PIL.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]
-source = ["python", "app"]
+source = ["structural_scheme"]
 branch = true
 
 [tool.coverage.report]

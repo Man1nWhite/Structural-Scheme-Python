@@ -10,7 +10,7 @@ from PIL import Image
 pytest.importorskip('playwright.sync_api', reason='Установите extra [browser] для E2E-тестов')
 from playwright.sync_api import expect
 
-from python.scheme_core import normalizeState, parseState, serializeState
+from structural_scheme.scheme_core import normalizeState, parseState, serializeState
 from tests.projects import loadedState
 
 pytestmark = pytest.mark.browser

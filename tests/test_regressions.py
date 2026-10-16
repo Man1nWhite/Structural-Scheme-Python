@@ -2,8 +2,8 @@
 import time
 from xml.etree import ElementTree as ET
 
-from python.scheme_core import *
-from python.validation import layoutProblems
+from structural_scheme.scheme_core import *
+from structural_scheme.validation import layoutProblems
 from tests.projects import loadedState
 
 LONG = 'АРМ оператора центрального пульта управления установки каталитического крекинга №12'

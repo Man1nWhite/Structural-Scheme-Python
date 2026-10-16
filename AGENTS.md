@@ -3,11 +3,14 @@
 Это Python-замена исходного генератора АСУ ТП. Python >=3.11, Node не нужен.
 Язык интерфейса и документации — русский. Не создавайте релизы и changelog.
 
-- `python/scheme_core.py`: модель v1, нормализация, логические связи, раскладка и маршруты.
-- `python/render.py`: SVG и Draw.io **только из одной готовой модели**, без новой геометрии.
-- `python/export.py`: векторный экспорт и растры через resvg/Pillow, без браузера и системного Cairo.
-- `python/validation.py`: Shapely/STRtree, инварианты из оригинального helpers.js.
-- `app/`: FastAPI + vanilla JS/CSS, локальные ресурсы, относительные HTTP URL.
+- `structural_scheme/scheme_core.py`: модель v1, нормализация, логические связи, раскладка и маршруты.
+- `structural_scheme/render.py`: SVG и Draw.io **только из одной готовой модели**, без новой геометрии.
+- `structural_scheme/export.py`: векторный экспорт и растры через resvg/Pillow, без браузера и системного Cairo.
+- `structural_scheme/validation.py`: Shapely/STRtree, инварианты из оригинального helpers.js.
+- `structural_scheme/app.py` + `static/`: FastAPI + vanilla JS/CSS, локальные ресурсы,
+  относительные HTTP URL. Устанавливается только пакет `structural_scheme`; файл `app.py`
+  в корне — совместимость для `python -m app`, добавляя публичную функцию — экспортируйте
+  её в `structural_scheme/__init__.py` (там же `__all__`), это публичный API.
 - `tests/`: pytest, точный перенос генератора routing.test.js (с арифметикой JS double),
   Hypothesis на 1000 проектов, экспорт/API/CLI, проверки самого валидатора.
 - `tests/browser/`: Playwright Python + настоящий локальный сервер, отдельный
@@ -28,7 +31,7 @@ mypy/ruff без причины; вместо `# type: ignore` исправля�
 Не заменяйте пользовательские действия вызовом функций JS или моками DOM.
 Синхронизируйте сценарии событиями/ожиданиями Playwright, не sleep. Падающие
 сценарии сохраняют trace/screenshot/HTML в игнорируемый `test-results/`.
-Запуск: `python -m app`. CLI: `python generate.py examples/demo.json -o out.svg`.
+Запуск: `python -m structural_scheme` (историческая `python -m app` тоже работает). CLI: `python generate.py examples/demo.json -o out.svg`.
 
 Добавляя поля, обновляйте PROJECT_DEFAULTS/ITEM_DEFAULTS, UI, тесты и документацию.
 Не меняйте формат v1 несовместимым образом. Ссылки на удалённые элементы — через makeResolvers.

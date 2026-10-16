@@ -16,12 +16,14 @@ source .venv/bin/activate
 # Windows PowerShell:
 # .venv\Scripts\Activate.ps1
 python -m pip install -e .
-python -m app
+python -m structural_scheme
 ```
 
 Откройте **http://localhost:8000**. Можно задать `--port 8080` или переменную `PORT`.
 По умолчанию сервер слушает `0.0.0.0` (в том числе для preview в Arena).
-Для доступа только с вашего компьютера: `python -m app --host 127.0.0.1`.
+Для доступа только с вашего компьютера: `python -m structural_scheme --host 127.0.0.1`.
+Из репозитория работает и историческая команда `python -m app` (файл-совместимость),
+но канонический запуск — `python -m structural_scheme`.
 Приложение рассчитано на доверенную локальную среду, не на публичный хостинг.
 
 `pip install -r requirements.txt` — альтернативный способ установки.
@@ -81,7 +83,7 @@ python generate.py project.json -o out.jpg
 ## Ядро и маршрутизация
 
 ```python
-from python.scheme_core import createDefaultState, buildScheme, to_svg, to_drawio
+from structural_scheme import createDefaultState, buildScheme, to_svg, to_drawio
 
 state = createDefaultState()
 state['project']['blocksPerRow'] = 3
@@ -89,6 +91,12 @@ model = buildScheme(state)
 svg = to_svg(model)
 xml = to_drawio(model)
 ```
+
+Модули: `structural_scheme/scheme_core.py` (модель и геометрия), `render.py`,
+`export.py`, `validation.py`, `app.py` (FastAPI) и `static/`. Устанавливается
+ровно один пакет — `structural_scheme`, поэтому в `site-packages` не появляются
+общие имена `python` и `app`. После обновления версии репозитория повторите
+`python -m pip install -e .`, чтобы отображение пакета обновилось.
 
 Модель — JSON-совместимые словари: `width`, `height`, `rooms`, `blocks`, `conns`,
 `ext`, `signals`, `legend`, `notes`, `warnings` (список предупреждений для

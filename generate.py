@@ -3,8 +3,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from python.export import export_model
-from python.scheme_core import buildScheme, parseState
+from structural_scheme.export import export_model
+from structural_scheme.scheme_core import buildScheme, parseState
 
 
 def main():

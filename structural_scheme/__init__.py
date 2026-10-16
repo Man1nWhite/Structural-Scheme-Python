@@ -1,0 +1,58 @@
+"""Структурные схемы АСУ ТП: модель v1, раскладка, трассировка и экспорт.
+
+Публичный API совпадает с исходным JS (`core.js`): доступны и camelCase-имена,
+и snake_case-алиасы. Геометрия считается один раз в `buildScheme`, а
+`toSvg`/`toDrawio` только рисуют готовую модель.
+
+    from structural_scheme import createDefaultState, buildScheme, to_svg
+
+    state = createDefaultState()
+    model = buildScheme(state)
+    svg = to_svg(model)
+"""
+from .scheme_core import (
+    COLORS,
+    CONSTS,
+    FORMAT,
+    FORMAT_VERSION,
+    ITEM_DEFAULTS,
+    KVM_PANEL_ID,
+    PROJECT_DEFAULTS,
+    build_scheme,
+    buildScheme,
+    clamp_per_row,
+    clampPerRow,
+    create_default_state,
+    createDefaultState,
+    fit,
+    fit_text,
+    fitText,
+    make_resolvers,
+    makeResolvers,
+    parse_state,
+    parseState,
+    raster_scale,
+    rasterScale,
+    route_band,
+    routeBand,
+    serialize_state,
+    serializeState,
+    signalLabel,
+    signalsOf,
+    text_width,
+    textWidth,
+    to_drawio,
+    to_svg,
+    toDrawio,
+    toSvg,
+)
+from .validation import layout_problems, layoutProblems
+
+__all__ = [
+    'COLORS', 'CONSTS', 'FORMAT', 'FORMAT_VERSION', 'ITEM_DEFAULTS', 'KVM_PANEL_ID',
+    'PROJECT_DEFAULTS', 'buildScheme', 'build_scheme', 'clampPerRow', 'clamp_per_row',
+    'createDefaultState', 'create_default_state', 'fit', 'fitText', 'fit_text', 'layoutProblems',
+    'layout_problems', 'makeResolvers', 'make_resolvers', 'parseState', 'parse_state',
+    'rasterScale', 'raster_scale', 'routeBand', 'route_band', 'serializeState', 'serialize_state',
+    'signalLabel', 'signalsOf', 'textWidth', 'text_width', 'toDrawio', 'to_drawio', 'toSvg', 'to_svg',
+]

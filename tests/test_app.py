@@ -6,8 +6,8 @@ from xml.etree import ElementTree as ET
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app import app
-from python.scheme_core import ITEM_DEFAULTS, createDefaultState, serializeState
+from structural_scheme.app import app
+from structural_scheme.scheme_core import ITEM_DEFAULTS, createDefaultState, serializeState
 
 client = TestClient(app)
 
@@ -31,18 +31,18 @@ def test_offline_assets_and_api():
 
 
 def test_module_main_uses_host_port_and_env(monkeypatch):
-    from app import __main__ as runner
+    from structural_scheme import __main__ as runner
     calls = {}
     monkeypatch.setattr(runner.uvicorn, 'run',
                         lambda target, host, port: calls.update(target=target, host=host, port=port))
     monkeypatch.setattr(sys, 'argv', ['app', '--host', '127.0.0.1', '--port', '8123'])
     runner.main()
-    assert calls == {'target': 'app:app', 'host': '127.0.0.1', 'port': 8123}
+    assert calls == {'target': 'structural_scheme.app:app', 'host': '127.0.0.1', 'port': 8123}
     monkeypatch.setattr(sys, 'argv', ['app'])
     monkeypatch.setenv('PORT', '9001')
     runner.main()
     # По умолчанию слушаем 0.0.0.0 (в том числе для preview в Arena) и берём PORT из окружения.
-    assert calls == {'target': 'app:app', 'host': '0.0.0.0', 'port': 9001}
+    assert calls == {'target': 'structural_scheme.app:app', 'host': '0.0.0.0', 'port': 9001}
 
 
 def test_block_limit_is_enforced_by_api():
@@ -71,7 +71,7 @@ def test_preview_reports_warnings_and_layout_errors(monkeypatch):
 
     def broken(state):
         raise ValueError('Тест: невозможно уложить связи')
-    monkeypatch.setattr('app.buildScheme', broken)
+    monkeypatch.setattr('structural_scheme.app.buildScheme', broken)
     r = client.post('/api/preview', json=createDefaultState())
     assert r.status_code == 422
     assert 'невозможно уложить связи' in r.json()['detail']

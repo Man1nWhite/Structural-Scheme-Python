@@ -2,8 +2,8 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from python.scheme_core import *
-from python.validation import layoutProblems
+from structural_scheme.scheme_core import *
+from structural_scheme.validation import layoutProblems
 from tests.projects import loadedState, makeRandom, sampleState
 
 
@@ -117,7 +117,7 @@ def test_interval_coloring_equals_maximum_depth(pairs):
 
 
 def test_validator_detects_original_failure_modes():
-    from python.scheme_core import D
+    from structural_scheme.scheme_core import D
     b = D(id='b',x=20,y=20,w=20,h=20)
     m = D(width=100,height=100,blocks=[b],rooms=[],signals=[],ext=[],notes=None,
           legend=D(x=0,y=80,w=100,h=20,items=[]), conns=[])

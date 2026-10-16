@@ -6,8 +6,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from python.export import export_model
-from python.scheme_core import ITEM_DEFAULTS, PROJECT_DEFAULTS, buildScheme, createDefaultState, normalizeState, to_svg
+from structural_scheme.export import export_model
+from structural_scheme.scheme_core import (
+    ITEM_DEFAULTS,
+    PROJECT_DEFAULTS,
+    buildScheme,
+    createDefaultState,
+    normalizeState,
+    to_svg,
+)
 
 app = FastAPI(title='Структурные схемы АСУ ТП', docs_url=None, redoc_url=None, openapi_url=None)
 STATIC = Path(__file__).parent / 'static'
