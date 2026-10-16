@@ -1,0 +1,130 @@
+{
+  "format": "structural-scheme",
+  "version": 1,
+  "project": {
+    "title": "Структурная схема комплекса",
+    "subtitle": "АСУ ТП установки",
+    "fileName": "structural_scheme",
+    "operatorName": "Операторная",
+    "serverName": "Серверная",
+    "autoName": "Помещение шкафов автоматики",
+    "blocksPerRow": 4,
+    "showNotes": true,
+    "showSignalCounts": false,
+    "kvmPanel": false,
+    "kvmPanelName": "Щит КВМ-удлинителей",
+    "notesText": ""
+  },
+  "opItems": [
+    {
+      "id": "861ec8061f92",
+      "name": "АРМ оператора №1",
+      "type": "АРМ",
+      "link": "Витая пара",
+      "target": "5cf816cfbc9f",
+      "kvmToPanel": true
+    },
+    {
+      "id": "8939baef078d",
+      "name": "АРМ оператора №2",
+      "type": "АРМ",
+      "link": "Витая пара",
+      "target": "5cf816cfbc9f",
+      "kvmToPanel": true
+    },
+    {
+      "id": "e3fd6d5f19d2",
+      "name": "Принтер сетевой",
+      "type": "Принтер",
+      "link": "Витая пара",
+      "target": "5cf816cfbc9f",
+      "kvmToPanel": false
+    },
+    {
+      "id": "65e8adc34de9",
+      "name": "Панель управления",
+      "type": "Панель управления",
+      "link": "Витая пара",
+      "target": "5cf816cfbc9f",
+      "kvmToPanel": false
+    }
+  ],
+  "racks": [
+    {
+      "id": "68cdcbd049ca",
+      "name": "Серверная стойка №1",
+      "servers": 3,
+      "kvm": true,
+      "ntp": true,
+      "ups": true,
+      "netTarget": "5cf816cfbc9f"
+    }
+  ],
+  "netCabs": [
+    {
+      "id": "5cf816cfbc9f",
+      "name": "Шкаф сетевой ШС-01",
+      "switches": 2,
+      "fw": 1,
+      "cross": 2,
+      "external": true,
+      "ups": true
+    }
+  ],
+  "autoCabs": [
+    {
+      "id": "c9d50f57fd0d",
+      "name": "Шкаф ША-01",
+      "ctrls": 2,
+      "uplink": "Витая пара",
+      "netTarget": "5cf816cfbc9f",
+      "di": true,
+      "dO": true,
+      "ai": true,
+      "ao": true,
+      "rs485": true,
+      "rs485Cab": false,
+      "rs485Target": null,
+      "diN": 32,
+      "doN": 32,
+      "aiN": 16,
+      "aoN": 2
+    },
+    {
+      "id": "152440601b0b",
+      "name": "Шкаф ША-02",
+      "ctrls": 1,
+      "uplink": "Витая пара",
+      "netTarget": "5cf816cfbc9f",
+      "di": true,
+      "dO": true,
+      "ai": true,
+      "ao": true,
+      "rs485": true,
+      "rs485Cab": false,
+      "rs485Target": null,
+      "diN": 32,
+      "doN": 32,
+      "aiN": 16,
+      "aoN": 2
+    },
+    {
+      "id": "2ddf1d340426",
+      "name": "Шкаф ША-03",
+      "ctrls": 1,
+      "uplink": "Витая пара",
+      "netTarget": "5cf816cfbc9f",
+      "di": true,
+      "dO": true,
+      "ai": true,
+      "ao": true,
+      "rs485": true,
+      "rs485Cab": false,
+      "rs485Target": null,
+      "diN": 32,
+      "doN": 32,
+      "aiN": 16,
+      "aoN": 2
+    }
+  ]
+}

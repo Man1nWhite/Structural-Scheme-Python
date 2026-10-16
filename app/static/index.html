@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Структурная схема · АСУ ТП</title><link rel="stylesheet" href="/static/style.css"><script defer src="/static/app.js"></script></head>
+<body>
+<header><div class="brand">▦</div><div><h1>Структурная схема</h1><p>АСУ ТП · Локальный редактор</p></div><span class="offline">● Без облака</span></header>
+<main>
+<section class="editor"><nav id="tabs" aria-label="Разделы проекта"></nav><div class="actions"><button id="save">Сохранить проект</button><button id="open">Открыть JSON</button><button id="reset" class="quiet">Начать заново</button><input type="file" id="file" accept=".json,application/json" hidden></div><div id="fields"></div></section>
+<section class="drawing"><div class="toolbar"><div><h2>Предпросмотр</h2><span id="status" role="status">Загрузка…</span></div><div class="exports"><button data-format="svg">⬇ SVG</button><button data-format="png">⬇ PNG</button><button data-format="jpg">⬇ JPG</button><button data-format="drawio">⬇ Draw.io</button></div><label class="zoom">Масштаб <select id="zoom"><option value="fit">По ширине</option><option value=".5">50%</option><option value="1">100%</option><option value="2">200%</option></select></label></div><div id="error" role="alert" hidden></div><div id="preview" aria-label="Схема"></div></section>
+</main><footer>Python · Единая модель SVG / PNG / JPG / Draw.io · Все данные остаются на вашем компьютере</footer>
+</body></html>

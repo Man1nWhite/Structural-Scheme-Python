@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Генератор структурных схем</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useRef } = React;
+
+    const COLORS = {
+      'Витая пара': '#2563eb',
+      'Оптика': '#f97316',
+      'KVM': '#6b7280',
+      'RS-485': '#16a34a',
+      'DI': '#0891b2',
+      'DO': '#7c3aed',
+      'AI': '#db2777',
+      'AO': '#a16207',
+    };
+    const NAME_BY_COLOR = {};
+    Object.keys(COLORS).forEach(k => { NAME_BY_COLOR[COLORS[k]] = k; });
+
+    const uid = () => Math.random().toString(36).slice(2, 9);
+    const chunk = (a, n) => { const r = []; for (let i = 0; i < a.length; i += n) r.push(a.slice(i, i + n)); return r; };
+    const groupBy = (arr, keyFn) => {
+      const m = new Map();
+      arr.forEach(x => { const k = keyFn(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); });
+      return [...m.values()];
+    };
+    const fit = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+    const pad2 = n => String(n).padStart(2, '0');
+    const signalLabel = (signal, showCounts) =>
+      showCounts && signal.n != null && signal.n !== '' ? `${signal.k} (${signal.n})` : signal.k;
+
+    const NET1_ID = uid();
+    const RACK1_ID = uid();
+
+    // ---------- Геометрия ----------
+    const BW = 190;        // ширина блока
+    const GAP_MIN = 30;    // минимальный зазор между колонками
+    const SLOT = 7;        // шаг вертикалей, идущих по межколоночному зазору
+    const SLOT_M = 8;      // отступ первой такой вертикали от блока
+    const LSTEP = 8;       // шаг горизонтальных каналов в полосе
+    const EXIT_STEP = 20;  // разнос точек выхода на одной грани блока
+    const OP_H = 86, RACK_H = 110, NET_H = 128, AUTO_H = 88;
+    const SIG_H = 64;      // зона стрелок сигналов под шкафами автоматики
+    const HEAD = 32;       // заголовок уровня (помещения)
+    const MARGIN = 18;     // поле листа
+    const LEVEL_FILL = { op: '#eff6ff', srv: '#f0fdf4', auto: '#fefce8' };
+
+    // ---------- UI-атомы ----------
+    const Inp = (p) => <input {...p} className={"border border-gray-300 rounded px-2 py-1 text-sm w-full " + (p.className || '')} />;
+    const Num = (p) => <input type="number" min="0" {...p} className="border border-gray-300 rounded px-2 py-1 text-sm w-16" />;
+    const Sel = ({ className, children, ...p }) => <select {...p} className={"border border-gray-300 rounded px-2 py-1 text-sm " + (className || 'w-full')}>{children}</select>;
+    const Chk = ({ checked, onChange, ...p }) => <input {...p} type="checkbox" checked={checked} onChange={onChange} className="w-4 h-4 accent-blue-600" />;
+    const Lbl = ({ children }) => <label className="block text-xs font-medium text-gray-600 mb-1">{children}</label>;
+    const AddBtn = ({ onClick, children }) => (
+      <button onClick={onClick} className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 mt-2">＋ {children}</button>
+    );
+    const DelBtn = ({ onClick }) => (
+      <button onClick={onClick} title="Удалить" className="text-red-500 hover:text-red-700 px-2 font-bold">✕</button>
+    );
+
+    // ---------- Раздача каналов внутри одной горизонтальной полосы ----------
+    // h: { x1, x2, top:[x...], bot:[x...] } — пролёт и абсциссы вертикалей, подходящих к нему сверху/снизу.
+    // Строится граф «кто обязан быть выше кого», затем каналы раздаются без пересечений (где это возможно).
+    function routeBand(hs) {
+      const n = hs.length;
+      hs.forEach(h => { h.track = -1; });
+      if (!n) return 0;
+      const above = hs.map(() => new Set()); // above[i] — пролёты, которые должны лежать ВЫШЕ i
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          if (i === j) continue;
+          const A = hs[i], B = hs[j];
+          const inside = x => x > A.x1 && x < A.x2;
+          if (B.top.some(inside)) above[i].add(j); // вертикаль B сверху пересекает пролёт A → A ниже B
+          if (B.bot.some(inside)) above[j].add(i); // вертикаль B снизу пересекает пролёт A → A выше B
+        }
+      }
+      const placed = new Array(n).fill(false), order = [];
+      for (let s = 0; s < n; s++) {
+        let best = -1, bestCnt = Infinity, bestLen = Infinity;
+        for (let i = 0; i < n; i++) {
+          if (placed[i]) continue;
+          let cnt = 0;
+          above[i].forEach(j => { if (!placed[j]) cnt++; });
+          const len = hs[i].x2 - hs[i].x1;
+          if (cnt < bestCnt || (cnt === bestCnt && len < bestLen)) { best = i; bestCnt = cnt; bestLen = len; }
+        }
+        placed[best] = true;
+        order.push(best);
+      }
+      let tracks = 0;
+      order.forEach(i => {
+        let t = 0;
+        above[i].forEach(j => { if (hs[j].track >= 0) t = Math.max(t, hs[j].track + 1); });
+        const busy = tt => hs.some((h, k) => k !== i && h.track === tt && !(h.x2 + 4 < hs[i].x1 || h.x1 > hs[i].x2 + 4));
+        while (busy(t)) t++;
+        hs[i].track = t;
+        tracks = Math.max(tracks, t + 1);
+      });
+      return tracks;
+    }
+
+    function SchemeGenerator() {
+      const svgRef = useRef(null);
+      const [tab, setTab] = useState('project');
+
+      const [project, setProject] = useState({
+        title: 'Структурная схема комплекса',
+        subtitle: 'АСУ ТП установки',
+        fileName: 'structural_scheme',
+        operatorName: 'Операторная',
+        serverName: 'Серверная',
+        autoName: 'Помещение шкафов автоматики',
+        blocksPerRow: 4,
+        showNotes: true,
+        showSignalCounts: false,
+        kvmPanel: false,
+        kvmPanelName: 'Щит КВМ-удлинителей',
+        notesText: '',
+      });
+
+      const [opItems, setOpItems] = useState([
+        { id: uid(), name: 'АРМ оператора №1', type: 'АРМ', link: 'Витая пара', target: NET1_ID, kvmToPanel: true },
+        { id: uid(), name: 'АРМ оператора №2', type: 'АРМ', link: 'Витая пара', target: NET1_ID, kvmToPanel: true },
+        { id: uid(), name: 'Принтер сетевой', type: 'Принтер', link: 'Витая пара', target: NET1_ID, kvmToPanel: false },
+        { id: uid(), name: 'Панель управления', type: 'Панель управления', link: 'Витая пара', target: NET1_ID, kvmToPanel: false },
+      ]);
+
+      const [racks, setRacks] = useState([
+        { id: RACK1_ID, name: 'Серверная стойка №1', servers: 3, kvm: true, ntp: true, ups: true, netTarget: NET1_ID },
+      ]);
+
+      const [netCabs, setNetCabs] = useState([
+        { id: NET1_ID, name: 'Шкаф сетевой ШС-01', switches: 2, fw: 1, cross: 2, external: true, ups: true },
+      ]);
+
+      const [autoCabs, setAutoCabs] = useState([
+        { id: uid(), name: 'Шкаф ША-01', ctrls: 2, uplink: 'Витая пара', netTarget: NET1_ID, di: true, dO: true, ai: true, ao: true, rs485: true, diN: 32, doN: 32, aiN: 16, aoN: 2 },
+        { id: uid(), name: 'Шкаф ША-02', ctrls: 1, uplink: 'Витая пара', netTarget: NET1_ID, di: true, dO: true, ai: true, ao: true, rs485: true, diN: 32, doN: 32, aiN: 16, aoN: 2 },
+        { id: uid(), name: 'Шкаф ША-03', ctrls: 1, uplink: 'Витая пара', netTarget: NET1_ID, di: true, dO: true, ai: true, ao: true, rs485: true, diN: 32, doN: 32, aiN: 16, aoN: 2 },
+      ]);
+
+      const upd = (setter) => (id, field, value) => setter(list => list.map(x => x.id === id ? { ...x, [field]: value } : x));
+      const del = (setter) => (id) => setter(list => list.filter(x => x.id !== id));
+      const updOp = upd(setOpItems), updRack = upd(setRacks), updNet = upd(setNetCabs), updAuto = upd(setAutoCabs);
+
+      // ---------- Цели соединений ----------
+      const srvTargetIds = new Set([...netCabs.map(c => c.id), ...racks.map(r => r.id)]);
+      const effTarget = (id, allowPanel) => {
+        if (allowPanel && id === 'kvmpanel' && project.kvmPanel) return 'kvmpanel';
+        if (srvTargetIds.has(id)) return id;
+        return netCabs[0] ? netCabs[0].id : (racks[0] ? racks[0].id : null);
+      };
+      const effNet = (id) => netCabs.some(c => c.id === id) ? id : (netCabs[0] ? netCabs[0].id : null);
+      const effAutoTarget = (id, sourceId) => {
+        if (id !== sourceId && autoCabs.some(c => c.id === id)) return id;
+        const target = autoCabs.find(c => c.id !== sourceId);
+        return target ? target.id : null;
+      };
+
+      const perRow = Math.max(1, Number(project.blocksPerRow) || 1);
+      const hasExternal = netCabs.some(c => c.external);
+      const titleH = project.subtitle ? 82 : 58;
+
+      // ============================================================
+      // РАСКЛАДКА И ТРАССИРОВКА
+      // ============================================================
+      const build = (GAPX) => {
+        const colStep = BW + GAPX;
+        const sidePad = Math.max(GAPX, hasExternal ? 84 : 0);
+
+        // Полоса — горизонтальная область для горизонтальных участков линий:
+        // межрядные зазоры внутри уровня ('inner') и коридоры между уровнями ('corridor').
+        const mkBand = (id, kind, reserved, last) =>
+          ({ id, kind, reserved, last, hs: [], tracks: 0, y: 0, height: 0, pad: kind === 'corridor' ? 22 : 12 });
+
+        // Уровень: ряды блоков на ОБЩЕЙ сетке колонок
+        const mkLevel = (key, items, hOf, reserved) => {
+          const raw = chunk(items, perRow);
+          const cols = Math.max(1, ...raw.map(r => r.length));
+          const blocks = [];
+          const rows = raw.map((row, r) => {
+            const off = Math.floor((cols - row.length) / 2);
+            return row.map((item, c) => {
+              const b = { id: item.id, item, kind: item.kind, level: key, row: r, col: off + c, w: BW, h: hOf(item), x: 0, y: 0 };
+              blocks.push(b);
+              return b;
+            });
+          });
+          return {
+            key, rows, cols, blocks, nRows: rows.length,
+            rowH: rows.map(row => Math.max(...row.map(b => b.h))),
+            bands: rows.map((_, r) => mkBand(key + ':' + r, 'inner', reserved, r === rows.length - 1)),
+            gapRuns: {}, startX: 0, y: 0, height: 0,
+          };
+        };
+
+        const opAll = [
+          ...opItems.map(i => ({ ...i, kind: 'item' })),
+          ...(project.kvmPanel ? [{ id: 'kvmpanel', kind: 'panel', name: project.kvmPanelName }] : []),
+        ];
+        const srvAll = [...racks.map(r => ({ ...r, kind: 'rack' })), ...netCabs.map(c => ({ ...c, kind: 'net' }))];
+        const autoAll = autoCabs.map(c => ({ ...c, kind: 'auto' }));
+
+        const LV = {
+          op: mkLevel('op', opAll, () => OP_H, 0),
+          srv: mkLevel('srv', srvAll, it => it.kind === 'rack' ? RACK_H : NET_H, 0),
+          auto: mkLevel('auto', autoAll, () => AUTO_H, SIG_H),
+        };
+        const levels = [LV.op, LV.srv, LV.auto];
+        const C1 = mkBand('C1', 'corridor', 0, false); // операторная ↔ серверная
+        const C2 = mkBand('C2', 'corridor', 0, false); // серверная ↔ автоматика
+
+        const maxCols = Math.max(...levels.map(L => L.cols));
+        const width = Math.max(880, 2 * (MARGIN + sidePad) + maxCols * colStep - GAPX);
+        levels.forEach(L => {
+          L.startX = (width - (L.cols * colStep - GAPX)) / 2;
+          L.blocks.forEach(b => { b.x = L.startX + b.col * colStep; });
+        });
+        const blk = {};
+        levels.forEach(L => L.blocks.forEach(b => { blk[b.id] = b; }));
+        const cx = b => b.x + b.w / 2;
+        const firstNet = LV.srv.blocks.find(b => b.kind === 'net') || LV.srv.blocks[0] || null;
+        const panel = blk['kvmpanel'] || null;
+
+        // ---- логические связи ----
+        const conns = [];
+        LV.op.blocks.forEach(b => {
+          if (b.kind !== 'item') return;
+          const it = b.item;
+          const tId = effTarget(it.target, true);
+          const toPanel = tId === 'kvmpanel' && !!panel;
+          const tgt = toPanel ? panel : (blk[tId] || firstNet);
+          if (tgt) conns.push({ src: b, tgt, color: COLORS[toPanel ? 'KVM' : it.link] || COLORS['Витая пара'] });
+          if (panel && it.kvmToPanel && !toPanel) conns.push({ src: b, tgt: panel, color: COLORS['KVM'] });
+        });
+        LV.srv.blocks.forEach(b => {
+          if (b.kind !== 'rack') return;
+          if (panel && b.item.kvm) conns.push({ src: b, tgt: panel, color: COLORS['KVM'] });
+          const t = blk[effNet(b.item.netTarget)];
+          if (t) conns.push({ src: b, tgt: t, color: COLORS['Витая пара'] });
+        });
+        const rs485CabLinks = new Set();
+        LV.auto.blocks.forEach(b => {
+          const t = blk[effNet(b.item.netTarget)];
+          if (t) conns.push({ src: b, tgt: t, color: COLORS[b.item.uplink] || COLORS['Витая пара'] });
+
+          if (b.item.rs485Cab) {
+            const targetId = effAutoTarget(b.item.rs485Target, b.id);
+            const target = blk[targetId];
+            const linkKey = target ? [b.id, target.id].sort().join('|') : null;
+            if (target && !rs485CabLinks.has(linkKey)) {
+              rs485CabLinks.add(linkKey);
+              conns.push({ src: b, tgt: target, color: COLORS['RS-485'] });
+            }
+          }
+        });
+
+        // ---- грани выхода/входа и основная полоса ----
+        const ORD = { op: 0, srv: 1, auto: 2 };
+        conns.forEach(c => {
+          const S = c.src, T = c.tgt;
+          c.u = false;
+          if (S.level === T.level) {
+            const L = LV[S.level];
+            if (S.row < T.row) { c.sEdge = 'bottom'; c.tEdge = 'top'; c.band = L.bands[T.row - 1]; }
+            else if (S.row > T.row) { c.sEdge = 'top'; c.tEdge = 'bottom'; c.band = L.bands[T.row]; }
+            else { c.u = true; c.sEdge = 'bottom'; c.tEdge = 'bottom'; c.band = L.bands[S.row]; } // U-образная в зазоре под рядом
+          } else {
+            const down = ORD[S.level] < ORD[T.level];
+            c.sEdge = down ? 'bottom' : 'top';
+            c.tEdge = down ? 'top' : 'bottom';
+            c.band = (S.level === 'op' || T.level === 'op') ? C1 : C2;
+          }
+        });
+
+        // ---- точки выхода: разнос по грани в порядке положения целей ----
+        groupBy(conns, c => c.src.id + '|' + c.sEdge).forEach(g => {
+          g.sort((a, b) => cx(a.tgt) - cx(b.tgt));
+          g.forEach((c, i) => { c.sx = cx(c.src) + (i - (g.length - 1) / 2) * EXIT_STEP; });
+        });
+
+        // ---- подход от грани блока к полосе: прямой либо через межколоночный зазор ----
+        const approach = (c, isSrc, otherX) => {
+          const B = isSrc ? c.src : c.tgt, O = isSrc ? c.tgt : c.src;
+          const edge = isSrc ? c.sEdge : c.tEdge;
+          const px = isSrc ? c.sx : c.tx;
+          const L = LV[B.level];
+          let r0, r1; // ряды, которые пересекает вертикаль
+          if (B.level === O.level) {
+            if (isSrc) { r0 = Math.min(B.row, O.row) + 1; r1 = Math.max(B.row, O.row) - 1; }
+            else { r0 = 1; r1 = 0; }
+          } else if (edge === 'bottom') { r0 = B.row + 1; r1 = L.nRows - 1; }
+          else { r0 = 0; r1 = B.row - 1; }
+          let len = 0, blocked = false;
+          for (let r = r0; r <= r1; r++) { len++; if (L.rows[r].some(o => o.col === B.col)) blocked = true; }
+          if (!blocked) return { x: px, run: null, jog: null };
+          const dir = otherX >= cx(B) ? 'R' : 'L';           // в какую сторону от блока уходим
+          const g = dir === 'R' ? B.col + 1 : B.col;          // зазор g — между колонками g-1 и g
+          const run = { g, side: dir === 'R' ? 'L' : 'R', len, px, ax: cx(B) };
+          (L.gapRuns[g] = L.gapRuns[g] || []).push(run);
+          return { x: px, run, jog: edge === 'bottom' ? L.bands[B.row] : L.bands[B.row - 1] };
+        };
+        const proxyOf = a => a.run ? a.run.ax : a.x;
+        const assignSlots = () => levels.forEach(L => Object.keys(L.gapRuns).forEach(k => {
+          const g = Number(k), runs = L.gapRuns[k];
+          const gl = L.startX + g * colStep - GAPX;
+          const Ls = runs.filter(r => r.side === 'L').sort((a, b) => a.len - b.len || a.px - b.px);
+          const Rs = runs.filter(r => r.side === 'R').sort((a, b) => a.len - b.len || b.px - a.px);
+          Ls.forEach((r, i) => { r.ax = gl + SLOT_M + i * SLOT; });
+          Rs.forEach((r, i) => { r.ax = gl + GAPX - SLOT_M - i * SLOT; });
+        }));
+
+        conns.forEach(c => { c.sApp = approach(c, true, cx(c.tgt)); });
+        assignSlots();
+
+        // ---- точки входа: U-образные слева, сквозные по x источника, U-образные справа ----
+        groupBy(conns, c => c.tgt.id + '|' + c.tEdge).forEach(g => {
+          const T = g[0].tgt, tc = cx(T);
+          const key = c => c.u ? (cx(c.src) < tc ? 0 : 2) : 1;
+          g.sort((a, b) => {
+            const ka = key(a), kb = key(b);
+            if (ka !== kb) return ka - kb;
+            return ka === 1 ? proxyOf(a.sApp) - proxyOf(b.sApp) : b.sx - a.sx;
+          });
+          g.forEach((c, j) => { c.tx = T.x + T.w * (j + 1) / (g.length + 1); });
+        });
+        conns.forEach(c => { c.tApp = approach(c, false, proxyOf(c.sApp)); });
+        assignSlots();
+
+        let needGap = 0;
+        levels.forEach(L => Object.values(L.gapRuns).forEach(runs => {
+          needGap = Math.max(needGap, 2 * SLOT_M + (runs.length - 1) * SLOT);
+        }));
+
+        // ---- горизонтальные участки → полосы ----
+        const mk = (a, b) => ({ x1: Math.min(a, b), x2: Math.max(a, b), top: [], bot: [], track: 0 });
+        conns.forEach(c => {
+          const sX = proxyOf(c.sApp), tX = proxyOf(c.tApp);
+          c.main = mk(sX, tX);
+          (c.sEdge === 'bottom' ? c.main.top : c.main.bot).push(sX);
+          (c.tEdge === 'top' ? c.main.bot : c.main.top).push(tX);
+          c.band.hs.push(c.main);
+          if (c.sApp.run) {
+            c.sJog = mk(c.sx, sX);
+            if (c.sEdge === 'bottom') { c.sJog.top.push(c.sx); c.sJog.bot.push(sX); }
+            else { c.sJog.bot.push(c.sx); c.sJog.top.push(sX); }
+            c.sApp.jog.hs.push(c.sJog);
+          }
+          if (c.tApp.run) {
+            c.tJog = mk(tX, c.tx);
+            if (c.tEdge === 'top') { c.tJog.top.push(tX); c.tJog.bot.push(c.tx); }
+            else { c.tJog.bot.push(tX); c.tJog.top.push(c.tx); }
+            c.tApp.jog.hs.push(c.tJog);
+          }
+        });
+        const allBands = [C1, C2, ...levels.flatMap(L => L.bands)];
+        allBands.forEach(b => { b.tracks = routeBand(b.hs); });
+
+        // ---- вертикальная раскладка ----
+        const bandH = (b) => {
+          const lines = b.tracks ? 2 * b.pad + (b.tracks - 1) * LSTEP : 0;
+          if (b.kind === 'corridor') return Math.max(44, lines);
+          return b.reserved + Math.max(b.last ? 8 : 18, lines);
+        };
+        const trackY = (b, t) => b.y + b.reserved + b.pad + t * LSTEP;
+        let y = titleH;
+        const layoutLevel = (L) => {
+          L.y = y; let cy = y + HEAD;
+          L.rows.forEach((row, r) => {
+            row.forEach(b => { b.y = cy; });
+            cy += L.rowH[r];
+            const b = L.bands[r]; b.y = cy; b.height = bandH(b); cy += b.height;
+          });
+          if (!L.nRows) cy += 12;
+          L.height = cy + 6 - y; y += L.height;
+        };
+        layoutLevel(LV.op);
+        C1.y = y; C1.height = bandH(C1); y += C1.height;
+        layoutLevel(LV.srv);
+        C2.y = y; C2.height = bandH(C2); y += C2.height;
+        layoutLevel(LV.auto);
+
+        // ---- точки маршрутов ----
+        conns.forEach(c => {
+          const S = c.src, T = c.tgt;
+          c.sy = c.sEdge === 'bottom' ? S.y + S.h : S.y;
+          c.ty = c.tEdge === 'top' ? T.y : T.y + T.h;
+          const sX = proxyOf(c.sApp), tX = proxyOf(c.tApp);
+          const pts = [[c.sx, c.sy]];
+          if (c.sApp.run) { const jy = trackY(c.sApp.jog, c.sJog.track); pts.push([c.sx, jy], [sX, jy]); }
+          const my = trackY(c.band, c.main.track); pts.push([sX, my], [tX, my]);
+          if (c.tApp.run) { const jy = trackY(c.tApp.jog, c.tJog.track); pts.push([tX, jy], [c.tx, jy]); }
+          pts.push([c.tx, c.ty]);
+          c.pts = pts;
+        });
+
+        // ---- внешняя связь ----
+        const ext = LV.srv.blocks.filter(b => b.kind === 'net' && b.item.external).map(b => {
+          const row = LV.srv.rows[b.row];
+          const rightmost = row[row.length - 1] === b;
+          return {
+            b, y: b.y + b.h - 12, x1: b.x + b.w,
+            x2: rightmost ? width - MARGIN + 14 : b.x + b.w + GAPX - 6,
+            label: rightmost,
+          };
+        });
+
+        return { width, LV, levels, conns, C1, C2, blk, ext, needGap, bottom: y };
+      };
+
+      let M = null, gapx = GAP_MIN;
+      for (let i = 0; i < 4; i++) {
+        M = build(gapx);
+        if (M.needGap <= gapx) break;
+        gapx = M.needGap;
+      }
+      const { width, LV, conns, blk, ext } = M;
+      const levelX = MARGIN, levelW = width - 2 * MARGIN;
+
+      // ---------- ЛЕГЕНДА / ПРИМЕЧАНИЯ ----------
+      const used = new Set();
+      conns.forEach(c => { if (NAME_BY_COLOR[c.color]) used.add(NAME_BY_COLOR[c.color]); });
+      autoCabs.forEach(c => {
+        if (c.rs485) used.add('RS-485');
+        if (c.di) used.add('DI'); if (c.dO) used.add('DO');
+        if (c.ai) used.add('AI'); if (c.ao) used.add('AO');
+      });
+      if (hasExternal) used.add('Оптика');
+      const legendItems = Object.keys(COLORS).filter(k => used.has(k));
+      const itemW = 170;
+      const legCols = Math.max(1, Math.floor((width - 2 * MARGIN) / itemW));
+      const legRows = Math.ceil(legendItems.length / legCols) || 1;
+      const legendY = M.bottom + 24;
+      const legendH = 34 + legRows * 24;
+
+      const noteLines = project.showNotes ? project.notesText.split('\n').filter(Boolean) : [];
+      const notesY = legendY + legendH + 18;
+      const totalH = notesY + (noteLines.length ? 20 + noteLines.length * 16 : 0) + 24;
+
+      // ---------- ОПИСАНИЯ БЛОКОВ ----------
+      const opLines = (it) => [it.type];
+      const panelLines = () => ['KVM-удлинители', `Стоек подключено: ${racks.filter(r => r.kvm).length}`];
+      const rackLines = (r) => {
+        const l = [`Серверов: ${r.servers}`];
+        if (r.ntp) l.push('Сервер NTP');
+        if (r.kvm) l.push('KVM');
+        if (r.ups) l.push('ИБП RACK');
+        return l;
+      };
+      const netLines = (c) => {
+        const l = [`Коммутаторов: ${c.switches}`];
+        if (c.fw > 0) l.push(`Межсетевых экранов: ${c.fw}`);
+        if (c.cross > 0) l.push(`Опт. кроссов: ${c.cross}`);
+        if (c.external) l.push('Внешняя связь');
+        if (c.ups) l.push('ИБП RACK');
+        return l;
+      };
+      const autoLines = (c) => [`Контроллеров: ${c.ctrls}`];
+      const linesOf = (b) => {
+        if (b.kind === 'item') return opLines(b.item);
+        if (b.kind === 'panel') return panelLines();
+        if (b.kind === 'rack') return rackLines(b.item);
+        if (b.kind === 'net') return netLines(b.item);
+        return autoLines(b.item);
+      };
+      const fillOf = (b) => b.kind === 'panel' ? '#f1f5f9' : '#ffffff';
+      const signalsOf = (c) => {
+        const s = [];
+        if (c.di) s.push({ k: 'DI', n: c.diN });
+        if (c.dO) s.push({ k: 'DO', n: c.doN });
+        if (c.ai) s.push({ k: 'AI', n: c.aiN });
+        if (c.ao) s.push({ k: 'AO', n: c.aoN });
+        if (c.rs485) s.push({ k: 'RS-485' });
+        return s;
+      };
+      const allBlocks = M.levels.flatMap(L => L.blocks);
+      const levelMeta = [
+        { L: LV.op, name: project.operatorName, fill: LEVEL_FILL.op, id: 'lvl_op' },
+        { L: LV.srv, name: project.serverName, fill: LEVEL_FILL.srv, id: 'lvl_srv' },
+        { L: LV.auto, name: project.autoName, fill: LEVEL_FILL.auto, id: 'lvl_auto' },
+      ];
+
+      // ---------- ЭКСПОРТ ----------
+      const fname = (project.fileName || 'scheme').replace(/[^\wа-яА-ЯёЁ-]+/g, '_');
+      const getSvg = () => {
+        let s = new XMLSerializer().serializeToString(svgRef.current);
+        if (!s.includes('xmlns=')) s = s.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+        return s;
+      };
+      const saveBlob = (blob, name) => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = name; a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      };
+      const exportSvg = () => saveBlob(new Blob([getSvg()], { type: 'image/svg+xml;charset=utf-8' }), fname + '.svg');
+      const exportRaster = (type) => {
+        const img = new Image();
+        img.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = width * 2; c.height = totalH * 2;
+          const ctx = c.getContext('2d');
+          ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, c.width, c.height);
+          ctx.drawImage(img, 0, 0, c.width, c.height);
+          c.toBlob(b => saveBlob(b, fname + (type === 'image/jpeg' ? '.jpg' : '.png')), type, 0.95);
+        };
+        img.onerror = () => alert('Не удалось растеризовать схему. Попробуйте экспорт в SVG.');
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(getSvg());
+      };
+
+      // ---------- ЭКСПОРТ В DRAW.IO ----------
+      const exportDrawio = () => {
+        const xesc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const hesc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const R = n => Math.round(n);
+        const cells = [];
+        let eid = 0;
+
+        const vtx = (id, value, x, y, w, h, style) =>
+          cells.push(`<mxCell id="${id}" value="${xesc(value)}" style="${style}" vertex="1" parent="1"><mxGeometry x="${R(x)}" y="${R(y)}" width="${R(w)}" height="${R(h)}" as="geometry"/></mxCell>`);
+
+        vtx('t1', `<b>${hesc(project.title)}</b>`, MARGIN, 8, width - 2 * MARGIN, 26,
+          'text;html=1;align=center;verticalAlign=middle;fontSize=18;fontColor=#111827;');
+        if (project.subtitle) vtx('t2', hesc(project.subtitle), MARGIN, 38, width - 2 * MARGIN, 18,
+          'text;html=1;align=center;verticalAlign=middle;fontSize=12;fontColor=#6b7280;');
+
+        const lvlStyle = f => `rounded=1;dashed=1;dashPattern=6 4;fillColor=${f};strokeColor=#94a3b8;verticalAlign=top;align=left;spacingLeft=10;spacingTop=2;fontSize=12;fontStyle=1;fontColor=#475569;html=1;`;
+        levelMeta.forEach(m => vtx(m.id, hesc(m.name), levelX, m.L.y, levelW, m.L.height, lvlStyle(m.fill)));
+
+        const blockVal = (title, lines) =>
+          `<b>${hesc(title)}</b><hr size="1"/>` + lines.map(l => `<div style="text-align:left;">• ${hesc(l)}</div>`).join('');
+        const blockStyle = f => `rounded=1;whiteSpace=wrap;html=1;fillColor=${f};strokeColor=#334155;verticalAlign=top;align=center;fontSize=10;fontColor=#111827;spacing=4;`;
+        allBlocks.forEach(b => vtx('b_' + b.id, blockVal(b.item.name, linesOf(b)), b.x, b.y, b.w, b.h, blockStyle(fillOf(b))));
+
+        conns.forEach(c => {
+          const S = c.src, T = c.tgt;
+          const exitX = ((c.sx - S.x) / S.w).toFixed(3), exitY = c.sEdge === 'top' ? 0 : 1;
+          const entryX = ((c.tx - T.x) / T.w).toFixed(3), entryY = c.tEdge === 'top' ? 0 : 1;
+          const inner = c.pts.slice(1, -1).map(p => `<mxPoint x="${R(p[0])}" y="${R(p[1])}"/>`).join('');
+          cells.push(`<mxCell id="e${eid++}" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=none;strokeWidth=2;strokeColor=${c.color};exitX=${exitX};exitY=${exitY};exitDx=0;exitDy=0;entryX=${entryX};entryY=${entryY};entryDx=0;entryDy=0;" edge="1" parent="1" source="b_${S.id}" target="b_${T.id}"><mxGeometry relative="1" as="geometry"><Array as="points">${inner}</Array></mxGeometry></mxCell>`);
+        });
+
+        ext.forEach(e => {
+          const exitY = ((e.y - e.b.y) / e.b.h).toFixed(3);
+          cells.push(`<mxCell id="e${eid++}" value="${e.label ? 'Внешняя связь' : ''}" style="endArrow=block;endFill=1;dashed=1;dashPattern=7 4;html=1;strokeWidth=2;strokeColor=${COLORS['Оптика']};fontColor=${COLORS['Оптика']};fontSize=9;verticalAlign=bottom;exitX=1;exitY=${exitY};exitDx=0;exitDy=0;" edge="1" parent="1" source="b_${e.b.id}"><mxGeometry relative="1" as="geometry"><mxPoint x="${R(e.x2)}" y="${R(e.y)}" as="targetPoint"/></mxGeometry></mxCell>`);
+        });
+
+        LV.auto.blocks.forEach(b => {
+          const sigs = signalsOf(b.item);
+          sigs.forEach((s, i) => {
+            const sx = b.x + b.w * (i + 1) / (sigs.length + 1);
+            const ey = b.y + b.h + 44;
+            const label = signalLabel(s, project.showSignalCounts);
+            const exitX = ((i + 1) / (sigs.length + 1)).toFixed(3);
+            cells.push(`<mxCell id="e${eid++}" value="${xesc(label)}" style="endArrow=block;endFill=1;html=1;strokeWidth=2;strokeColor=${COLORS[s.k]};fontColor=${COLORS[s.k]};fontSize=9;fontStyle=1;verticalAlign=bottom;exitX=${exitX};exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="b_${b.id}"><mxGeometry relative="1" as="geometry"><mxPoint x="${R(sx)}" y="${R(ey)}" as="targetPoint"/></mxGeometry></mxCell>`);
+          });
+        });
+
+        vtx('leg', '<b>Условные обозначения:</b>', levelX, legendY, levelW, legendH,
+          'rounded=1;html=1;fillColor=#ffffff;strokeColor=#94a3b8;verticalAlign=top;align=left;spacingLeft=10;spacingTop=2;fontSize=11;fontColor=#374151;');
+        legendItems.forEach((k, i) => {
+          const col = i % legCols, row = Math.floor(i / legCols);
+          const lx = levelX + 14 + col * itemW, ly = legendY + 36 + row * 24;
+          vtx('leg_' + i, `<font color="${COLORS[k]}">▬▬▬</font> ${hesc(k)}`, lx, ly - 10, itemW - 12, 20,
+            'text;html=1;align=left;verticalAlign=middle;fontSize=10;fontColor=#374151;');
+        });
+
+        if (project.showNotes && noteLines.length) {
+          const val = '<b>Примечания:</b>' + noteLines.map(t => `<div>${hesc(t)}</div>`).join('');
+          vtx('notes', val, levelX, notesY, levelW, 20 + noteLines.length * 16,
+            'text;html=1;align=left;verticalAlign=top;fontSize=10;fontColor=#4b5563;');
+        }
+
+        const xml = `<mxfile host="app.diagrams.net" agent="scheme-generator" version="1.1"><diagram id="d1" name="Схема"><mxGraphModel dx="800" dy="600" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="${R(width)}" pageHeight="${R(totalH)}" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/>${cells.join('')}</root></mxGraphModel></diagram></mxfile>`;
+        saveBlob(new Blob([xml], { type: 'application/xml' }), fname + '.drawio');
+      };
+
+      // ---------- ЭЛЕМЕНТЫ SVG ----------
+      const Conn = ({ c }) => (
+        <path d={c.pts.map((p, i) => `${i ? 'L' : 'M'} ${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ')}
+          stroke={c.color} strokeWidth="1.7" fill="none" strokeLinejoin="round" />
+      );
+
+      const Block = ({ b }) => (
+        <g>
+          <rect x={b.x} y={b.y} width={b.w} height={b.h} rx="6" fill={fillOf(b)} stroke="#334155" strokeWidth="1.3" />
+          <text x={b.x + b.w / 2} y={b.y + 16} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#111827">{fit(b.item.name, 28)}</text>
+          <line x1={b.x + 8} y1={b.y + 24} x2={b.x + b.w - 8} y2={b.y + 24} stroke="#cbd5e1" />
+          {linesOf(b).map((t, i) => <text key={i} x={b.x + 12} y={b.y + 40 + i * 16} fontSize="10" fill="#374151">• {fit(t, 30)}</text>)}
+        </g>
+      );
+
+      const TargetSelect = ({ value, onChange, allowPanel }) => (
+        <Sel value={value || ''} onChange={onChange}>
+          {netCabs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          {racks.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          {allowPanel && project.kvmPanel && <option value="kvmpanel">{project.kvmPanelName}</option>}
+        </Sel>
+      );
+      const NetSelect = ({ value, onChange }) => (
+        <Sel value={value || ''} onChange={onChange}>
+          {netCabs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Sel>
+      );
+      const AutoTargetSelect = ({ sourceId, value, onChange }) => (
+        <Sel value={effAutoTarget(value, sourceId) || ''} onChange={onChange}>
+          {autoCabs.filter(c => c.id !== sourceId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </Sel>
+      );
+
+      const tabs = [
+        ['project', 'Проект'], ['op', 'Операторная'], ['srv', 'Серверная'], ['auto', 'Шкафы автоматики'],
+      ];
+
+      return (
+        <div className="p-4 bg-gray-100 min-h-screen font-sans">
+          <div className="max-w-6xl mx-auto space-y-4">
+            <div className="bg-white rounded-lg shadow p-4">
+              <div className="flex flex-wrap gap-2 border-b border-gray-200 pb-2 mb-4">
+                {tabs.map(([k, l]) => (
+                  <button key={k} onClick={() => setTab(k)}
+                    className={"px-3 py-1.5 rounded-t text-sm font-medium " + (tab === k ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')}>
+                    {l}
+                  </button>
+                ))}
+                <div className="flex-1" />
+                <button onClick={exportSvg} className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ SVG</button>
+                <button onClick={() => exportRaster('image/png')} className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ PNG</button>
+                <button onClick={() => exportRaster('image/jpeg')} className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded hover:bg-emerald-700">⬇ JPG</button>
+                <button onClick={exportDrawio} className="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700">⬇ Draw.io</button>
+              </div>
+
+              {tab === 'project' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div><Lbl>Название схемы</Lbl><Inp value={project.title} onChange={e => setProject({ ...project, title: e.target.value })} /></div>
+                  <div><Lbl>Подзаголовок</Lbl><Inp value={project.subtitle} onChange={e => setProject({ ...project, subtitle: e.target.value })} /></div>
+                  <div><Lbl>Имя выходных файлов</Lbl><Inp value={project.fileName} onChange={e => setProject({ ...project, fileName: e.target.value })} /></div>
+                  <div><Lbl>Блоков в одном ряду</Lbl><Num value={project.blocksPerRow} min="1" onChange={e => setProject({ ...project, blocksPerRow: e.target.value })} /></div>
+                  <div><Lbl>Название операторной</Lbl><Inp value={project.operatorName} onChange={e => setProject({ ...project, operatorName: e.target.value })} /></div>
+                  <div><Lbl>Название серверной</Lbl><Inp value={project.serverName} onChange={e => setProject({ ...project, serverName: e.target.value })} /></div>
+                  <div><Lbl>Название помещения шкафов автоматики</Lbl><Inp value={project.autoName} onChange={e => setProject({ ...project, autoName: e.target.value })} /></div>
+                  <div className="flex items-center gap-6 pt-4">
+                    <label className="flex items-center gap-2 text-sm"><Chk checked={project.showNotes} onChange={e => setProject({ ...project, showNotes: e.target.checked })} />Показывать примечания</label>
+                    <label className="flex items-center gap-2 text-sm"><Chk checked={project.showSignalCounts} onChange={e => setProject({ ...project, showSignalCounts: e.target.checked })} />Показывать количества сигналов</label>
+                  </div>
+                  {project.showNotes && (
+                    <div className="md:col-span-2"><Lbl>Текст примечаний</Lbl>
+                      <textarea value={project.notesText} onChange={e => setProject({ ...project, notesText: e.target.value })}
+                        className="border border-gray-300 rounded px-2 py-1 text-sm w-full h-20" />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {tab === 'op' && (
+                <div>
+                  <div className="flex flex-wrap items-center gap-4 mb-4 p-3 bg-gray-50 rounded border border-gray-200">
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <Chk checked={project.kvmPanel} onChange={e => setProject({ ...project, kvmPanel: e.target.checked })} />
+                      Щит КВМ-удлинителей в операторной
+                    </label>
+                    {project.kvmPanel && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Название:</span>
+                        <Inp className="w-64" value={project.kvmPanelName} onChange={e => setProject({ ...project, kvmPanelName: e.target.value })} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-12 gap-2 text-xs font-semibold text-gray-500 mb-1 px-1">
+                    <div className="col-span-3">Название</div><div className="col-span-2">Тип</div>
+                    <div className="col-span-2">Связь</div><div className="col-span-3">Куда</div>
+                    <div>KVM→щит</div><div></div>
+                  </div>
+                  {opItems.map(it => (
+                    <div key={it.id} className="grid grid-cols-12 gap-2 items-center mb-1">
+                      <div className="col-span-3"><Inp value={it.name} onChange={e => updOp(it.id, 'name', e.target.value)} /></div>
+                      <div className="col-span-2">
+                        <Sel value={it.type} onChange={e => updOp(it.id, 'type', e.target.value)}>
+                          <option>АРМ</option><option>Принтер</option><option>Панель управления</option>
+                        </Sel>
+                      </div>
+                      <div className="col-span-2">
+                        <Sel value={it.link} onChange={e => updOp(it.id, 'link', e.target.value)}>
+                          <option>Витая пара</option><option>Оптика</option><option>KVM</option>
+                        </Sel>
+                      </div>
+                      <div className="col-span-3">
+                        <TargetSelect value={effTarget(it.target, true)} onChange={e => updOp(it.id, 'target', e.target.value)} allowPanel />
+                      </div>
+                      <div>
+                        {project.kvmPanel && effTarget(it.target, true) !== 'kvmpanel'
+                          ? <Chk checked={!!it.kvmToPanel} onChange={e => updOp(it.id, 'kvmToPanel', e.target.checked)} />
+                          : <span className="text-gray-300 text-xs">—</span>}
+                      </div>
+                      <DelBtn onClick={() => del(setOpItems)(it.id)} />
+                    </div>
+                  ))}
+                  <AddBtn onClick={() => setOpItems([...opItems, { id: uid(), name: 'АРМ оператора №' + (opItems.length + 1), type: 'АРМ', link: 'Витая пара', target: netCabs[0] ? netCabs[0].id : null, kvmToPanel: false }])}>Добавить</AddBtn>
+                </div>
+              )}
+
+              {tab === 'srv' && (
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="font-semibold text-sm mb-2">Серверные стойки</h3>
+                    <div className="grid grid-cols-12 gap-2 text-xs font-semibold text-gray-500 mb-1 px-1">
+                      <div className="col-span-4">Название</div><div>Серверов</div><div className="col-span-3">Подключение к</div>
+                      <div>KVM</div><div>NTP</div><div>ИБП</div><div></div>
+                    </div>
+                    {racks.map(r => (
+                      <div key={r.id} className="grid grid-cols-12 gap-2 items-center mb-1">
+                        <div className="col-span-4"><Inp value={r.name} onChange={e => updRack(r.id, 'name', e.target.value)} /></div>
+                        <div><Num value={r.servers} onChange={e => updRack(r.id, 'servers', Number(e.target.value))} /></div>
+                        <div className="col-span-3"><NetSelect value={effNet(r.netTarget)} onChange={e => updRack(r.id, 'netTarget', e.target.value)} /></div>
+                        <div><Chk checked={r.kvm} onChange={e => updRack(r.id, 'kvm', e.target.checked)} /></div>
+                        <div><Chk checked={r.ntp} onChange={e => updRack(r.id, 'ntp', e.target.checked)} /></div>
+                        <div><Chk checked={r.ups} onChange={e => updRack(r.id, 'ups', e.target.checked)} /></div>
+                        <DelBtn onClick={() => del(setRacks)(r.id)} />
+                      </div>
+                    ))}
+                    <AddBtn onClick={() => setRacks([...racks, { id: uid(), name: 'Серверная стойка №' + (racks.length + 1), servers: 2, kvm: false, ntp: false, ups: true, netTarget: netCabs[0] ? netCabs[0].id : null }])}>Добавить стойку</AddBtn>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sm mb-2">Сетевые шкафы</h3>
+                    <div className="grid grid-cols-12 gap-2 text-xs font-semibold text-gray-500 mb-1 px-1">
+                      <div className="col-span-4">Название</div><div>Комм.</div><div>МЭ</div><div className="col-span-2">Опт. кроссы</div>
+                      <div className="col-span-2">Внешняя связь</div><div>ИБП</div><div></div>
+                    </div>
+                    {netCabs.map(c => (
+                      <div key={c.id} className="grid grid-cols-12 gap-2 items-center mb-1">
+                        <div className="col-span-4"><Inp value={c.name} onChange={e => updNet(c.id, 'name', e.target.value)} /></div>
+                        <div><Num value={c.switches} onChange={e => updNet(c.id, 'switches', Number(e.target.value))} /></div>
+                        <div><Num value={c.fw} onChange={e => updNet(c.id, 'fw', Number(e.target.value))} /></div>
+                        <div className="col-span-2"><Num value={c.cross} onChange={e => updNet(c.id, 'cross', Number(e.target.value))} /></div>
+                        <div className="col-span-2"><Chk checked={c.external} onChange={e => updNet(c.id, 'external', e.target.checked)} /></div>
+                        <div><Chk checked={c.ups} onChange={e => updNet(c.id, 'ups', e.target.checked)} /></div>
+                        <DelBtn onClick={() => del(setNetCabs)(c.id)} />
+                      </div>
+                    ))}
+                    <AddBtn onClick={() => setNetCabs([...netCabs, { id: uid(), name: 'Шкаф сетевой ШС-' + pad2(netCabs.length + 1), switches: 2, fw: 0, cross: 1, external: false, ups: true }])}>Добавить сетевой шкаф</AddBtn>
+                  </div>
+                </div>
+              )}
+
+              {tab === 'auto' && (
+                <div className="overflow-x-auto">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 mb-1 px-1">
+                    <div className="w-40 shrink-0">Название</div><div className="w-16 shrink-0">Контр.</div>
+                    <div className="w-28 shrink-0">Связь сверху</div><div className="w-44 shrink-0">Куда</div>
+                    <div className="w-8 shrink-0">DI</div><div className="w-8 shrink-0">DO</div>
+                    <div className="w-8 shrink-0">AI</div><div className="w-8 shrink-0">AO</div>
+                    <div className="w-16 shrink-0">RS-485 вниз</div>
+                    <div className="w-24 shrink-0">RS-485 между</div><div className="w-44 shrink-0">Связать со шкафом</div><div></div>
+                  </div>
+                  {autoCabs.map(c => (
+                    <div key={c.id} className="flex items-start gap-2 mb-1">
+                      <div className="w-40 shrink-0"><Inp value={c.name} onChange={e => updAuto(c.id, 'name', e.target.value)} /></div>
+                      <div className="w-16 shrink-0"><Num value={c.ctrls} onChange={e => updAuto(c.id, 'ctrls', Number(e.target.value))} /></div>
+                      <div className="w-28 shrink-0">
+                        <Sel value={c.uplink} onChange={e => updAuto(c.id, 'uplink', e.target.value)}>
+                          <option>Витая пара</option><option>Оптика</option>
+                        </Sel>
+                      </div>
+                      <div className="w-44 shrink-0"><NetSelect value={effNet(c.netTarget)} onChange={e => updAuto(c.id, 'netTarget', e.target.value)} /></div>
+                      {[['di', 'diN'], ['dO', 'doN'], ['ai', 'aiN'], ['ao', 'aoN']].map(([f, nf]) => (
+                        <div key={f} className="w-8 shrink-0 flex flex-col items-start gap-1 pt-1">
+                          <Chk checked={c[f]} onChange={e => updAuto(c.id, f, e.target.checked)} />
+                          {project.showSignalCounts && c[f] && (
+                            <input type="number" min="0" value={c[nf]} onChange={e => updAuto(c.id, nf, Number(e.target.value))}
+                              className="border border-gray-300 rounded px-1 py-0.5 text-xs w-12" />
+                          )}
+                        </div>
+                      ))}
+                      <div className="w-16 shrink-0 pt-1"><Chk checked={c.rs485} onChange={e => updAuto(c.id, 'rs485', e.target.checked)} /></div>
+                      <div className="w-24 shrink-0 pt-1">
+                        <Chk checked={!!c.rs485Cab} disabled={autoCabs.length < 2} onChange={e => updAuto(c.id, 'rs485Cab', e.target.checked)} />
+                      </div>
+                      <div className="w-44 shrink-0">
+                        {c.rs485Cab && autoCabs.length > 1
+                          ? <AutoTargetSelect sourceId={c.id} value={c.rs485Target} onChange={e => updAuto(c.id, 'rs485Target', e.target.value)} />
+                          : <span className="text-gray-300 text-xs">—</span>}
+                      </div>
+                      <DelBtn onClick={() => del(setAutoCabs)(c.id)} />
+                    </div>
+                  ))}
+                  <AddBtn onClick={() => setAutoCabs([...autoCabs, { id: uid(), name: 'Шкаф ША-' + pad2(autoCabs.length + 1), ctrls: 1, uplink: 'Витая пара', netTarget: netCabs[0] ? netCabs[0].id : null, di: true, dO: true, ai: true, ao: false, rs485: false, rs485Cab: false, rs485Target: autoCabs[0] ? autoCabs[0].id : null, diN: 16, doN: 8, aiN: 8, aoN: 0 }])}>Добавить шкаф</AddBtn>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-4 overflow-auto">
+              <svg ref={svgRef} xmlns="http://www.w3.org/2000/svg" width={width} height={totalH}
+                viewBox={`0 0 ${width} ${totalH}`} fontFamily="Arial, Helvetica, sans-serif" style={{ background: '#fff' }}>
+                <rect x="0" y="0" width={width} height={totalH} fill="#ffffff" />
+                <text x={width / 2} y={30} textAnchor="middle" fontSize="18" fontWeight="bold" fill="#111827">{project.title}</text>
+                {project.subtitle && <text x={width / 2} y={52} textAnchor="middle" fontSize="12" fill="#6b7280">{project.subtitle}</text>}
+
+                {/* помещения */}
+                {levelMeta.map(m => (
+                  <rect key={m.id} x={levelX} y={m.L.y} width={levelW} height={m.L.height} rx="8"
+                    fill={m.fill} stroke="#94a3b8" strokeWidth="1" strokeDasharray="6 4" />
+                ))}
+
+                {/* связи */}
+                {conns.map((c, i) => <Conn key={'c' + i} c={c} />)}
+
+                {/* внешняя связь */}
+                {ext.map((e, i) => (
+                  <g key={'ext' + i}>
+                    <line x1={e.x1} y1={e.y} x2={e.x2} y2={e.y} stroke={COLORS['Оптика']} strokeWidth="1.7" strokeDasharray="7 4" />
+                    <polygon points={`${e.x2},${e.y} ${e.x2 - 8},${e.y - 4} ${e.x2 - 8},${e.y + 4}`} fill={COLORS['Оптика']} />
+                    {e.label && <text x={e.x2 - 4} y={e.y - 7} textAnchor="end" fontSize="9" fill={COLORS['Оптика']}>Внешняя связь</text>}
+                  </g>
+                ))}
+
+                {/* блоки */}
+                {allBlocks.map(b => <Block key={b.id} b={b} />)}
+
+                {/* подписи помещений (поверх линий) */}
+                {levelMeta.map(m => (
+                  <g key={m.id + '_lbl'}>
+                    <rect x={levelX + 8} y={m.L.y + 7} width={m.name.length * 7.2 + 12} height={19} rx="4" fill={m.fill} />
+                    <text x={levelX + 14} y={m.L.y + 21} fontSize="12" fontWeight="bold" fill="#475569">{m.name}</text>
+                  </g>
+                ))}
+
+                {/* стрелки сигналов */}
+                {LV.auto.blocks.map(b => {
+                  const sigs = signalsOf(b.item);
+                  return sigs.map((s, i) => {
+                    const sx = b.x + b.w * (i + 1) / (sigs.length + 1);
+                    const ey = b.y + b.h + 44;
+                    const label = signalLabel(s, project.showSignalCounts);
+                    return (
+                      <g key={b.id + s.k}>
+                        <line x1={sx} y1={b.y + b.h} x2={sx} y2={ey - 6} stroke={COLORS[s.k]} strokeWidth="1.7" />
+                        <polygon points={`${sx},${ey} ${sx - 4},${ey - 7} ${sx + 4},${ey - 7}`} fill={COLORS[s.k]} />
+                        <text x={sx} y={ey + 13} textAnchor="middle" fontSize="9" fontWeight="bold" fill={COLORS[s.k]}>{label}</text>
+                      </g>
+                    );
+                  });
+                })}
+
+                {/* легенда */}
+                <g>
+                  <rect x={levelX} y={legendY} width={levelW} height={legendH} rx="6" fill="#ffffff" stroke="#94a3b8" />
+                  <text x={levelX + 14} y={legendY + 18} fontSize="11" fontWeight="bold" fill="#374151">Условные обозначения:</text>
+                  {legendItems.map((k, i) => {
+                    const col = i % legCols, row = Math.floor(i / legCols);
+                    const lx = levelX + 14 + col * itemW, ly = legendY + 36 + row * 24;
+                    return (
+                      <g key={k}>
+                        <line x1={lx} y1={ly} x2={lx + 30} y2={ly} stroke={COLORS[k]} strokeWidth="3" />
+                        <text x={lx + 38} y={ly + 4} fontSize="10" fill="#374151">{k}</text>
+                      </g>
+                    );
+                  })}
+                </g>
+
+                {project.showNotes && noteLines.length > 0 && (
+                  <g>
+                    <text x={levelX} y={notesY + 12} fontSize="11" fontWeight="bold" fill="#374151">Примечания:</text>
+                    {noteLines.map((t, i) => (
+                      <text key={i} x={levelX} y={notesY + 30 + i * 16} fontSize="10" fill="#4b5563">{t}</text>
+                    ))}
+                  </g>
+                )}
+              </svg>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<SchemeGenerator />);
+  </script>
+</body>
+
+</html>
