@@ -2,6 +2,8 @@
 import time
 from xml.etree import ElementTree as ET
 
+import pytest
+
 from structural_scheme.scheme_core import *
 from structural_scheme.validation import layoutProblems
 from tests.projects import loadedState
@@ -125,12 +127,38 @@ def test_gap_converges_to_needed_width_and_is_stable():
 
 
 def test_dense_layout_time_is_bounded():
-    # Охранный порог против возврата квадратичного пересканирования реестра
-    # (было ~4 с на 300 портов, стало ~0.5 с). Значение в 5 раз больше
-    # фактического, поэтому тест не должен мигать на медленной машине.
-    t0 = time.perf_counter()
-    buildScheme(dense(300))
-    assert time.perf_counter() - t0 < 2.5
+    """Охранный порог против возврата квадратичного пересканирования реестра.
+
+    Абсолютное время зависит от машины: Windows CI под coverage работает
+    примерно в 5 раз медленнее песочницы (2.6 с на 300 портов против 0.5 с),
+    поэтому одного порога мало — проверяется ещё и рост между размерами.
+    Прежний перебор всего реестра давал около 40x на четырёхкратном размере,
+    текущая реализация — 10–15x. Оба условия вместе ловят возврат регрессии
+    и на быстрой, и на медленной машине.
+    """
+    def best_time(n, runs=2):
+        times = []
+        for _ in range(runs):
+            state = dense(n)
+            t0 = time.perf_counter()
+            buildScheme(state)
+            times.append(time.perf_counter() - t0)
+        return min(times)
+
+    t_small, t_large = best_time(75), best_time(300)
+    assert t_large < 10, f'раскладка 300 портов заняла {t_large:.1f} с'
+    assert t_large / t_small < 20, f'время выросло в {t_large/t_small:.1f} раз: {t_small:.3f} с -> {t_large:.3f} с'
+
+
+def test_huge_fan_in_fails_with_clear_error():
+    """За пределом ширины грани построение останавливается понятной ошибкой.
+
+    559 целей на одну грань 190 px ещё раскладываются (шаг 0.30 px), 560 —
+    уже физически невозможны: линии пришлось бы совместить.
+    """
+    assert layoutProblems(buildScheme(dense(559))) == []
+    with pytest.raises(ValueError, match='Недостаточно места для портов блока'):
+        buildScheme(dense(560))
 
 
 def test_loaded_project_has_no_warnings_and_small_sheet():
