@@ -1,4 +1,5 @@
 """Пользовательские сценарии в реальном браузере, без Node-проекта и моков DOM."""
+import contextlib
 import json
 from io import BytesIO
 from xml.etree import ElementTree as ET
@@ -238,12 +239,19 @@ def test_preview_error_recovers_on_next_edit(page, live_url):
 
 def test_new_edit_cancels_previous_preview_request(page, live_url):
     """Устаревший запрос превью отменяется, а не просто игнорируется."""
-    page.add_init_script("""window.__aborted = 0;
+    # Считаем только отмены незавершённых запросов: abort() срабатывает и у уже
+    # выполненных, поэтому по одному сигналу судить нельзя.
+    page.add_init_script("""window.__cancelled = 0;
         const originalFetch = window.fetch;
         window.fetch = (...args) => {
           const signal = args[1] && args[1].signal;
-          if (signal) signal.addEventListener('abort', () => { window.__aborted++; });
-          return originalFetch(...args);
+          if (!signal) return originalFetch(...args);
+          let inFlight = true;
+          const settle = () => { inFlight = false; };
+          signal.addEventListener('abort', () => { if (inFlight) window.__cancelled++; });
+          const request = originalFetch(...args);
+          request.then(settle, settle);
+          return request;
         };""")
     start(page, live_url)
     held = []
@@ -257,15 +265,17 @@ def test_new_edit_cancels_previous_preview_request(page, live_url):
     page.route('**/api/preview', hold_old_response)
     with page.expect_request(lambda r: r.url.endswith('/api/preview')):
         page.get_by_label('Название схемы', exact=True).fill('Старый ответ')
-    assert page.evaluate('window.__aborted') == 0
+    assert page.evaluate('window.__cancelled') == 0
     preview_change(page, lambda: page.get_by_label('Название схемы', exact=True).fill('Новый ответ'))
     expect(page.locator('#preview svg')).to_contain_text('Новый ответ')
     # Отмена не показывается пользователю как ошибка построения.
     expect(page.get_by_role('alert')).to_be_hidden()
     expect(page.locator('#status')).not_to_contain_text('Ошибка')
-    assert page.evaluate('window.__aborted') >= 1
+    assert page.evaluate('window.__cancelled') >= 1
     assert len(held) == 1
-    held[0].abort()
+    # Запрос уже отменён браузером, поэтому освобождение — не часть проверки.
+    with contextlib.suppress(Exception):
+        held[0].abort()
     # Ответ отменённого запроса не может перезаписать более новое редактирование.
     expect(page.locator('#preview svg')).to_contain_text('Новый ответ')
     expect(page.locator('#preview svg')).not_to_contain_text('Старый ответ')
