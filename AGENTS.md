@@ -3,11 +3,14 @@
 Это Python-замена исходного генератора АСУ ТП. Python >=3.11, Node не нужен.
 Язык интерфейса и документации — русский. Не создавайте релизы и changelog.
 
-- `python/scheme_core.py`: модель v1, нормализация, логические связи, раскладка и маршруты.
-- `python/render.py`: SVG и Draw.io **только из одной готовой модели**, без новой геометрии.
-- `python/export.py`: векторный экспорт и растры через resvg/Pillow, без браузера и системного Cairo.
-- `python/validation.py`: Shapely/STRtree, инварианты из оригинального helpers.js.
-- `app/`: FastAPI + vanilla JS/CSS, локальные ресурсы, относительные HTTP URL.
+- `structural_scheme/scheme_core.py`: модель v1, нормализация, логические связи, раскладка и маршруты.
+- `structural_scheme/render.py`: SVG и Draw.io **только из одной готовой модели**, без новой геометрии.
+- `structural_scheme/export.py`: векторный экспорт и растры через resvg/Pillow, без браузера и системного Cairo.
+- `structural_scheme/validation.py`: Shapely/STRtree, инварианты из оригинального helpers.js.
+- `structural_scheme/app.py` + `static/`: FastAPI + vanilla JS/CSS, локальные ресурсы,
+  относительные HTTP URL. Устанавливается только пакет `structural_scheme`; файл `app.py`
+  в корне — совместимость для `python -m app`, добавляя публичную функцию — экспортируйте
+  её в `structural_scheme/__init__.py` (там же `__all__`), это публичный API.
 - `tests/`: pytest, точный перенос генератора routing.test.js (с арифметикой JS double),
   Hypothesis на 1000 проектов, экспорт/API/CLI, проверки самого валидатора.
 - `tests/browser/`: Playwright Python + настоящий локальный сервер, отдельный
@@ -17,13 +20,18 @@
 
 Установка: `python -m pip install -e ".[test]"`.
 Основные проверки: `python -m pytest -q -m "not browser"`.
+Статические: `python -m pip install -e ".[test,lint]"`, затем `python -m mypy` и
+`python -m ruff check .` — оба обязаны быть чистыми. Покрытие с порогом:
+`python -m pytest -q -m "not browser" --cov` (порог 95% ветвей в pyproject,
+фактическое 97%). Не понижайте `fail_under` и не добавляйте игнорирование
+mypy/ruff без причины; вместо `# type: ignore` исправляйте тип или аннотацию.
 Браузер: `python -m pip install -e ".[test,browser]"`, затем
 `python -m playwright install chromium` и `python -m pytest tests/browser -q`.
 Отсутствующий Chromium при установленном Playwright — ошибка, не skip.
 Не заменяйте пользовательские действия вызовом функций JS или моками DOM.
 Синхронизируйте сценарии событиями/ожиданиями Playwright, не sleep. Падающие
 сценарии сохраняют trace/screenshot/HTML в игнорируемый `test-results/`.
-Запуск: `python -m app`. CLI: `python generate.py examples/demo.json -o out.svg`.
+Запуск: `python -m structural_scheme` (историческая `python -m app` тоже работает). CLI: `python generate.py examples/demo.json -o out.svg`.
 
 Добавляя поля, обновляйте PROJECT_DEFAULTS/ITEM_DEFAULTS, UI, тесты и документацию.
 Не меняйте формат v1 несовместимым образом. Ссылки на удалённые элементы — через makeResolvers.
@@ -35,6 +43,18 @@
 наложений микросдвигами глобально занятых координат. Увеличивайте зазоры до сходимости.
 При высоком fan-in расстояние портов ограничено физической шириной блока.
 Не обещайте отсутствие всех поперечных пересечений: схема не обязательно планарна.
+
+Производительность раскладки — часть контракта: не возвращайте в seat() перебор
+всего реестра занятых координат и не заменяйте инкрементальные счётчики в
+routeBand на повторный min(len(above[i] & left)). Оба места были квадратичными и
+делали превью 500-блочного проекта 12-секундным. Охранные тесты —
+test_dense_layout_time_is_bounded и test_gap_converges_to_needed_width_and_is_stable.
+Зазор между колонками ищется как неподвижная точка (может уменьшаться), а не только
+расти: иначе лист раздувается в 3 раза. Подписи блоков обрезаются fitText по ширине
+блока, число сокращённых подписей и прочие предупреждения обязаны попадать в
+model['warnings'] и быть видны пользователю (строка состояния и stderr CLI).
+Валидатор layoutProblems проверяет в том числе касание концов связи своих блоков,
+слияние портов одной грани и ширину подписей — не удаляйте эти инварианты.
 
 Не добавляйте CDN, облачные API, Node, браузерные сборщики или сетевые зависимости
 во время выполнения. Растровый экспорт ограничивайте 16 млн пикселей и 16384 по стороне.

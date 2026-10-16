@@ -1,9 +1,9 @@
 """Настоящий HTTP-сервер и изолированный Chromium-контекст на каждый тест."""
 import os
 import re
-from pathlib import Path
 import socket
 import threading
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
@@ -24,7 +24,7 @@ def live_url():
     # Заранее связанный сокет исключает гонку поиска свободного порта.
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
-        server = TestServer(uvicorn.Config('app:app', log_level='warning'))
+        server = TestServer(uvicorn.Config('structural_scheme.app:app', log_level='warning'))
         thread = threading.Thread(target=server.run, kwargs={'sockets': [sock]}, daemon=True)
         thread.start()
         try:

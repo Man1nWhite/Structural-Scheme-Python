@@ -1,8 +1,10 @@
 """Экспорт модели в векторные и растровые форматы без браузера."""
 from io import BytesIO
-from PIL import Image
+
 import resvg_py
-from .scheme_core import rasterScale, RASTER_MAX_PIXELS, to_svg, to_drawio
+from PIL import Image
+
+from .scheme_core import RASTER_MAX_PIXELS, rasterScale, to_drawio, to_svg
 
 
 def export_model(model, format):

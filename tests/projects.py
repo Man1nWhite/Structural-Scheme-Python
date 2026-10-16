@@ -1,5 +1,5 @@
 """Перенос reference/routing.test.js; LCG учитывает JS double, не Python int."""
-from python.scheme_core import *
+from structural_scheme.scheme_core import *
 
 
 def loadedState():

@@ -72,10 +72,12 @@ def to_drawio(m):
     graph = SubElement(diagram, 'mxGraphModel', grid='0', page='1', pageScale='1',
                        pageWidth=str(m['width']), pageHeight=str(m['height']))
     cells = SubElement(graph, 'root')
-    SubElement(cells, 'mxCell', id='0')
-    SubElement(cells, 'mxCell', id='1', parent='0')
+    SubElement(cells, 'mxCell', {'id': '0'})
+    SubElement(cells, 'mxCell', {'id': '1', 'parent': '0'})
     def vertex(id, value, x, y, w, h, style):
-        c = SubElement(cells, 'mxCell', id=id, value=value, style=style, vertex='1', parent='1')
+        # Атрибуты передаются словарём: 'parent' — служебное имя SubElement, и ключ
+        # работает как атрибут XML только благодаря позиционности аргумента в CPython.
+        c = SubElement(cells, 'mxCell', {'id': id, 'value': value, 'style': style, 'vertex': '1', 'parent': '1'})
         SubElement(c, 'mxGeometry', x=str(x), y=str(y), width=str(w), height=str(h), attrib={'as': 'geometry'})
     def text(id, value, x, y, w, h, size=10):
         vertex(id, escape(value), x, y, w, h, f'text;html=1;align=left;verticalAlign=top;fontSize={size};')

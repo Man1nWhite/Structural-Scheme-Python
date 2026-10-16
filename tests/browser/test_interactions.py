@@ -1,4 +1,5 @@
 """Пользовательские сценарии в реальном браузере, без Node-проекта и моков DOM."""
+import contextlib
 import json
 from io import BytesIO
 from xml.etree import ElementTree as ET
@@ -9,7 +10,7 @@ from PIL import Image
 pytest.importorskip('playwright.sync_api', reason='Установите extra [browser] для E2E-тестов')
 from playwright.sync_api import expect
 
-from python.scheme_core import parseState, normalizeState, serializeState
+from structural_scheme.scheme_core import normalizeState, parseState, serializeState
 from tests.projects import loadedState
 
 pytestmark = pytest.mark.browser
@@ -236,29 +237,46 @@ def test_preview_error_recovers_on_next_edit(page, live_url):
     expect(page.get_by_role('alert')).to_be_hidden()
 
 
-def test_late_preview_response_does_not_overwrite_new_edit(page, live_url):
+def test_new_edit_cancels_previous_preview_request(page, live_url):
+    """Устаревший запрос превью отменяется, а не просто игнорируется."""
+    # Считаем только отмены незавершённых запросов: abort() срабатывает и у уже
+    # выполненных, поэтому по одному сигналу судить нельзя.
+    page.add_init_script("""window.__cancelled = 0;
+        const originalFetch = window.fetch;
+        window.fetch = (...args) => {
+          const signal = args[1] && args[1].signal;
+          if (!signal) return originalFetch(...args);
+          let inFlight = true;
+          const settle = () => { inFlight = false; };
+          signal.addEventListener('abort', () => { if (inFlight) window.__cancelled++; });
+          const request = originalFetch(...args);
+          request.then(settle, settle);
+          return request;
+        };""")
     start(page, live_url)
     held = []
 
     def hold_old_response(route):
         if route.request.post_data_json['project']['title'] == 'Старый ответ':
-            held.append((route, route.fetch()))
-            # Оставляем запрос незавершённым, пока новое превью не нарисовано.
+            held.append(route)
         else:
             route.continue_()
 
     page.route('**/api/preview', hold_old_response)
     with page.expect_request(lambda r: r.url.endswith('/api/preview')):
         page.get_by_label('Название схемы', exact=True).fill('Старый ответ')
+    assert page.evaluate('window.__cancelled') == 0
     preview_change(page, lambda: page.get_by_label('Название схемы', exact=True).fill('Новый ответ'))
     expect(page.locator('#preview svg')).to_contain_text('Новый ответ')
+    # Отмена не показывается пользователю как ошибка построения.
+    expect(page.get_by_role('alert')).to_be_hidden()
+    expect(page.locator('#status')).not_to_contain_text('Ошибка')
+    assert page.evaluate('window.__cancelled') >= 1
     assert len(held) == 1
-    route, response = held[0]
-    with page.expect_response(lambda r: r.url.endswith('/api/preview') and
-                              r.request.post_data_json['project']['title'] == 'Старый ответ'):
-        route.fulfill(response=response)
-    # Обрабатываем обещания fetch и следующий animation frame без sleep.
-    page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    # Запрос уже отменён браузером, поэтому освобождение — не часть проверки.
+    with contextlib.suppress(Exception):
+        held[0].abort()
+    # Ответ отменённого запроса не может перезаписать более новое редактирование.
     expect(page.locator('#preview svg')).to_contain_text('Новый ответ')
     expect(page.locator('#preview svg')).not_to_contain_text('Старый ответ')
 

@@ -5,13 +5,20 @@ import heapq
 import json
 import math
 import re
+from bisect import bisect_left, bisect_right, insort
 from collections import defaultdict
 from copy import deepcopy
+from typing import Any
 from uuid import uuid4
 
 BW, GAP_MIN, SLOT, SLOT_M, LSTEP, EXIT_STEP = 190, 30, 7, 8, 8, 20
 OP_H, RACK_H, NET_H, AUTO_H, SIG_H, MARGIN = 86, 110, 128, 88, 64, 18
 SIG_LEN, HEAD, LEGEND_ITEM_W = 44, 32, 170
+NAME_SIZE, LINE_SIZE = 11, 10
+# Ниже этого шага порты одной грани визуально сливаются — предупреждаем
+# пользователя, но не считаем геометрию ошибочной (см. AGENTS.md про fan-in).
+PORT_WARN_STEP, PORT_MIN_STEP = 2.0, .05
+# Совместимость с JS API: CONSTS не читается Python-кодом, но экспортируется.
 CONSTS = {k: v for k, v in list(globals().items()) if k in (
     'BW GAP_MIN SLOT SLOT_M LSTEP EXIT_STEP OP_H RACK_H NET_H AUTO_H SIG_H MARGIN').split()}
 COLORS = {'Витая пара': '#2563eb', 'Оптика': '#f97316', 'KVM': '#6b7280',
@@ -28,7 +35,7 @@ PROJECT_DEFAULTS = dict(title='Структурная схема комплек�
     fileName='structural_scheme', operatorName='Операторная', serverName='Серверная',
     autoName='Помещение шкафов автоматики', blocksPerRow=4, showNotes=True,
     showSignalCounts=False, kvmPanel=False, kvmPanelName='Щит КВМ-удлинителей', notesText='')
-ITEM_DEFAULTS = {
+ITEM_DEFAULTS: dict[str, dict[str, Any]] = {
     'opItems': dict(id='', name='АРМ оператора', type='АРМ', link='Витая пара', target=None, kvmToPanel=False),
     'racks': dict(id='', name='Серверная стойка', servers=2, kvm=False, ntp=False, ups=True, netTarget=None),
     'netCabs': dict(id='', name='Шкаф сетевой', switches=2, fw=0, cross=1, external=False, ups=True),
@@ -39,13 +46,15 @@ ITEM_DEFAULTS = {
 
 class D(dict):
     """Словарь с доступом через точку, остаётся сериализуемым JSON."""
-    def __getattr__(self, key):
+
+    def __getattr__(self, key: str) -> Any:
         try:
             return self[key]
         except KeyError as e:
             raise AttributeError(key) from e
 
-    __setattr__ = dict.__setitem__
+    def __setattr__(self, key: str, value: Any) -> None:
+        self[key] = value
 
 
 def uid():
@@ -55,6 +64,42 @@ def uid():
 def fit(s, n):
     s = '' if s is None else str(s)
     return s[:n-1] + '…' if len(s) > n else s
+
+
+def textWidth(value, size, bold=False):
+    """Оценка ширины строки в px без шрифтовых библиотек (Arial / DejaVu Sans).
+
+    Нужна, чтобы подпись не выходила за блок и не наезжала на соседний: точный
+    расчёт потребовал бы загрузки шрифта, а для проверки влезания хватает
+    таблицы коэффициентов. Оценка намеренно пессимистична (шире реальной).
+    """
+    text = '' if value is None else str(value)
+    narrow = ' .,:;!|\'"()[]/\\-–—iljtI'
+    wide = 'МШЩЖЮмшщжюMW@№'
+    total = 0.0
+    for ch in text:
+        if ch in narrow:
+            f = .30
+        elif ch in wide:
+            f = .82
+        else:
+            f = .60
+        if bold and ch.isupper():
+            f += .07
+        total += f * size
+    return total
+
+
+def fitText(value, max_width, size, bold=False):
+    """Обрезка подписи по ширине блока: 'длинный текст' -> 'длинный те…'."""
+    text = '' if value is None else str(value)
+    if textWidth(text, size, bold) <= max_width:
+        return text
+    # Сначала дешёвая граница по числу знаков, затем точная обрезка по ширине.
+    text = fit(text, max(4, int(max_width/(.30*size))))
+    while text and textWidth(text + '…', size, bold) > max_width:
+        text = text[:-1]
+    return text + '…'
 
 
 def pad2(n):
@@ -112,7 +157,7 @@ def newAutoCab(state):
 
 
 def createDefaultState():
-    s = {'project': deepcopy(PROJECT_DEFAULTS), **{k: [] for k in ITEM_DEFAULTS}}
+    s: dict[str, Any] = {'project': deepcopy(PROJECT_DEFAULTS), **{k: [] for k in ITEM_DEFAULTS}}
     s['netCabs'] = [{**newNetCab(s), 'fw': 1, 'cross': 2, 'external': True}]
     for name, kind, kvm in [('АРМ оператора №1', 'АРМ', True), ('АРМ оператора №2', 'АРМ', True),
                              ('Принтер сетевой', 'Принтер', False), ('Панель управления', 'Панель управления', False)]:
@@ -203,7 +248,7 @@ def routeBand(hs):
     """Граф «выше» и назначение горизонтальных каналов из backup."""
     for h in hs:
         h['track'] = -1
-    above = [set() for _ in hs]
+    above: list[set[int]] = [set() for _ in hs]
     for i, a in enumerate(hs):
         for j, b in enumerate(hs):
             if i == j:
@@ -212,11 +257,26 @@ def routeBand(hs):
                 above[i].add(j)
             if any(a['x1'] < x < a['x2'] for x in b['bot']):
                 above[j].add(i)
+    # Порядок обхода — по (число незанятых соседей выше, ширина, индекс).
+    # Счётчики обновляются инкрементально: прежний min(len(above[i] & left))
+    # на каждом шаге делал раскладку квадратичной.
     left = set(range(len(hs)))
+    deg = [len(a) for a in above]
+    heap = [(deg[i], hs[i]['x2'] - hs[i]['x1'], i) for i in range(len(hs))]
+    heapq.heapify(heap)
     tracks = 0
     while left:
-        i = min(left, key=lambda i: (len(above[i] & left), hs[i]['x2'] - hs[i]['x1'], i))
-        left.remove(i)
+        while True:
+            d, _, i = heap[0]
+            if i in left and deg[i] == d:
+                break
+            heapq.heappop(heap)
+        heapq.heappop(heap)
+        left.discard(i)
+        for j in above[i]:
+            if j in left:
+                deg[j] -= 1
+                heapq.heappush(heap, (deg[j], hs[j]['x2'] - hs[j]['x1'], j))
         h = hs[i]
         t = max([0] + [hs[j]['track'] + 1 for j in above[i] if hs[j]['track'] >= 0])
         while any(k != i and b['track'] == t and not (b['x2'] + 4 < h['x1'] or b['x1'] > h['x2'] + 4)
@@ -233,7 +293,9 @@ def assign_gap_slots(runs):
     Интервалы замкнуты: касающиеся интервалы получают разные слоты.
     Сортировка по началу + очередь окончаний, не эвристика по длине.
     """
-    active, free, count = [], [], 0
+    active: list[tuple[float, int]] = []
+    free: list[int] = []
+    count = 0
     for i, r in sorted(enumerate(runs), key=lambda pair: (pair[1]['lo'], pair[1]['hi'], pair[0])):
         while active and active[0][0] < r['lo']:
             _, slot = heapq.heappop(active)
@@ -282,12 +344,12 @@ def layout(state, GAPX=GAP_MIN):
     levels = list(LV.values())
     C1, C2 = _band('C1', 'corridor'), _band('C2', 'corridor')
     side = max(GAPX, 84 if any(c['external'] for c in state['netCabs']) else 0)
-    width = max(880, 2 * (MARGIN + side) + max(l.cols for l in levels) * colStep - GAPX)
-    for l in levels:
-        l.startX = (width - (l.cols * colStep - GAPX)) / 2
-        for b in l.blocks:
-            b.x = l.startX + b.col * colStep
-    blk = {b.id: b for l in levels for b in l.blocks}
+    width = max(880, 2 * (MARGIN + side) + max(lvl.cols for lvl in levels) * colStep - GAPX)
+    for lvl in levels:
+        lvl.startX = (width - (lvl.cols * colStep - GAPX)) / 2
+        for b in lvl.blocks:
+            b.x = lvl.startX + b.col * colStep
+    blk = {b.id: b for lvl in levels for b in lvl.blocks}
     conns = []
     def add(b, id, kind):
         if id in blk and id != b.id:
@@ -315,18 +377,19 @@ def layout(state, GAPX=GAP_MIN):
                 rs.add(key)
                 add(b, t, 'RS-485')
     order = dict(op=0, srv=1, auto=2)
-    cx = lambda b: b.x + b.w / 2
+    def cx(b):
+        return b.x + b.w / 2
     for c in conns:
         s, t = c.src, c.tgt
         c.u = False
         if s.level == t.level:
-            l = LV[s.level]
+            lvl = LV[s.level]
             if s.row < t.row:
-                c.sEdge, c.tEdge, c.band = 'bottom', 'top', l.bands[t.row-1]
+                c.sEdge, c.tEdge, c.band = 'bottom', 'top', lvl.bands[t.row-1]
             elif s.row > t.row:
-                c.sEdge, c.tEdge, c.band = 'top', 'bottom', l.bands[t.row]
+                c.sEdge, c.tEdge, c.band = 'top', 'bottom', lvl.bands[t.row]
             else:
-                c.u, c.sEdge, c.tEdge, c.band = True, 'bottom', 'bottom', l.bands[s.row]
+                c.u, c.sEdge, c.tEdge, c.band = True, 'bottom', 'bottom', lvl.bands[s.row]
         else:
             down = order[s.level] < order[t.level]
             c.sEdge, c.tEdge = ('bottom', 'top') if down else ('top', 'bottom')
@@ -335,48 +398,67 @@ def layout(state, GAPX=GAP_MIN):
     # Символическая вертикальная ось не зависит от числа горизонтальных
     # каналов: целый ряд и каждая полоса имеют отдельные порядковые позиции.
     base = 0
-    for i, l in enumerate(levels):
-        l.base = base
-        for r, band in enumerate(l.bands):
+    for i, lvl in enumerate(levels):
+        lvl.base = base
+        for r, band in enumerate(lvl.bands):
             band.pos = base + 4*r + 4
-        base += 4*(l.nRows+1) + 4
+        base += 4*(lvl.nRows+1) + 4
         if i < 2:
             [C1, C2][i].pos = base-2
 
     def approach_info(c, source):
         b, o = (c.src, c.tgt) if source else (c.tgt, c.src)
         edge = c.sEdge if source else c.tEdge
-        l = LV[b.level]
+        lvl = LV[b.level]
         if b.level == o.level:
             r0, r1 = (min(b.row, o.row)+1, max(b.row, o.row)-1) if source else (1, 0)
         else:
-            r0, r1 = (b.row+1, l.nRows-1) if edge == 'bottom' else (0, b.row-1)
-        blocked = any(any(bb.col == b.col for bb in l.rows[r]) for r in range(r0, r1+1))
-        jog = l.bands[b.row if edge == 'bottom' else b.row-1] if blocked else None
-        port_pos = l.base + 4*b.row + (3 if edge == 'bottom' else 1)
+            r0, r1 = (b.row+1, lvl.nRows-1) if edge == 'bottom' else (0, b.row-1)
+        blocked = any(any(bb.col == b.col for bb in lvl.rows[r]) for r in range(r0, r1+1))
+        jog = lvl.bands[b.row if edge == 'bottom' else b.row-1] if blocked else None
+        port_pos = lvl.base + 4*b.row + (3 if edge == 'bottom' else 1)
         end = jog.pos if jog else c.band.pos
-        return b, o, edge, l, jog, min(port_pos, end)-.4, max(port_pos, end)+.4
+        return b, o, edge, lvl, jog, min(port_pos, end)-.4, max(port_pos, end)+.4
 
     # Совместный реестр вертикальных интервалов, а не глобально занятых X.
     # Непересекающиеся по Y линии переиспользуют координаты без сдвигов.
-    occupied = []
+    # Реестр отсортирован по X, поэтому конфликты ищутся окном через bisect:
+    # записи дальше spacing заведомо не могут нарушить разделение sep <= spacing.
+    occupied: list[tuple[float, float, float, float]] = []
+
+    def conflicts_near(center, lo, hi, radius):
+        i = bisect_left(occupied, (center-radius,))
+        j = bisect_right(occupied, (center+radius, math.inf, math.inf, math.inf))
+        return [(px, min(radius, sep)) for px, a, b, sep in occupied[i:j] if not (hi < a or lo > b)]
+
+    def free_pos(start, lo, hi, spacing, lower, upper, direction):
+        """Ближайшая свободная координата от start в одну сторону (без кандидатов)."""
+        pos = start
+        for _ in range(512):
+            if direction > 0 and pos > upper+1e-8:
+                return None
+            if direction < 0 and pos < lower-1e-8:
+                return None
+            covering = [(px, sep) for px, sep in conflicts_near(pos, lo, hi, spacing)
+                        if abs(pos-px) < sep-1e-8]
+            if not covering:
+                return pos
+            # Перепрыгиваем весь накрывающий интервал: следующая проверка
+            # точная, поэтому шагов ровно столько, сколько слияний до места.
+            pos = max(px+sep for px, sep in covering) if direction > 0 else min(px-sep for px, sep in covering)
+        return None
+
     def seat(x, lo, hi, lower, upper=None, spacing=SLOT):
-        candidate = max(lower, x)
-        if upper is not None:
-            candidate = min(upper, candidate)
-        # Ближайшая допустимая граница одного из запрещённых интервалов X.
-        conflicts = [(px, min(spacing, sep)) for px, a, b, sep in occupied if not (hi < a or lo > b)]
-        candidates = [candidate, lower]
-        if upper is not None:
-            candidates.append(upper)
-        for px, sep in conflicts:
-            candidates.extend([px-sep, px+sep])
-        for cx_ in sorted(candidates, key=lambda v: (abs(v-x), v)):
-            if cx_ < lower-1e-8 or (upper is not None and cx_ > upper+1e-8):
-                continue
-            if all(abs(cx_-px) >= sep-1e-8 for px, sep in conflicts):
-                occupied.append((cx_, lo, hi, spacing))
-                return cx_
+        limit = math.inf if upper is None else upper
+        candidate = min(max(x, lower), limit)
+        # Ближайшая свободная позиция с обеих сторон; при равенстве — левая,
+        # как и в прежнем порядке сортировки кандидатов по (|v-x|, v).
+        options = [v for v in (free_pos(candidate, lo, hi, spacing, lower, limit, -1),
+                               free_pos(candidate, lo, hi, spacing, lower, limit, 1)) if v is not None]
+        if options:
+            best = min(options, key=lambda v: (abs(v-x), v))
+            insort(occupied, (best, lo, hi, spacing))
+            return best
         # Очень высокий fan-in: физически невозможно выдержать шаг 7 px
         # на грани 190 px. Уменьшаем шаг, но никогда не совмещаем линии.
         if upper is not None and spacing > .1:
@@ -405,23 +487,33 @@ def layout(state, GAPX=GAP_MIN):
             x = cx(b) + (i-(len(ps)-1)/2)*step
             c[field] = seat(x, lo, hi, x-step*.4, x+step*.4, min(SLOT, step*.8))
 
+    # Порт сам по себе не ошибка, но слияние подписей и линий пользователь
+    # должен видеть: при высоком fan-in шаг ограничен шириной блока.
+    warnings = []
+    for (bid, edge), ps in ports.items():
+        xs = sorted(q[0][q[1]] for q in ps)
+        gap = min((b-a for a, b in zip(xs, xs[1:])), default=math.inf)
+        if gap < PORT_WARN_STEP:
+            warnings.append(f'Шаг портов {gap:.2f} px у блока «{fit(blk[bid].item["name"], 24)}»: '
+                            'линии могут сливаться, добавьте блоки или разнесите цели')
+
     def approach(c, source):
-        b, o, edge, l, jog, _, _ = approach_info(c, source)
+        b, o, edge, lvl, jog, _, _ = approach_info(c, source)
         px = c.sx if source else c.tx
         if jog is None:
             return D(x=px, run=None, jog=None)
         g = b.col+1 if cx(o) >= cx(b) else b.col
         run = D(g=g, lo=min(jog.pos,c.band.pos)-.4, hi=max(jog.pos,c.band.pos)+.4,
                 px=px, ax=cx(b))
-        l.gapRuns.setdefault(g, []).append(run)
+        lvl.gapRuns.setdefault(g, []).append(run)
         return D(x=px, run=run, jog=jog)
     for c in conns:
         c.sApp, c.tApp = approach(c, True), approach(c, False)
     needGap = GAP_MIN
     physical_gaps = defaultdict(list)
-    for l in levels:
-        for g, runs in l.gapRuns.items():
-            gl = l.startX + g*colStep - GAPX
+    for lvl in levels:
+        for g, runs in lvl.gapRuns.items():
+            gl = lvl.startX + g*colStep - GAPX
             physical_gaps[gl].extend(runs)
     for gl, runs in physical_gaps.items():
         count = assign_gap_slots(runs)
@@ -429,7 +521,8 @@ def layout(state, GAPX=GAP_MIN):
         for run in sorted(runs, key=lambda r: (r.lo,r.hi)):
             run.ax = seat(gl+SLOT_M+run.slot*SLOT, run.lo, run.hi, gl+SLOT_M)
             needGap = max(needGap, math.ceil(run.ax-gl+SLOT_M))
-    proxy = lambda a: a.run.ax if a.run else a.x
+    def proxy(a):
+        return a.run.ax if a.run else a.x
     def horizontal(a, b):
         return D(x1=min(a,b), x2=max(a,b), top=[], bot=[], track=0)
     for c in conns:
@@ -445,31 +538,32 @@ def layout(state, GAPX=GAP_MIN):
                 h['bot' if edge == 'bottom' else 'top'].append(proxy(a))
                 c[prefix+'Jog'] = h
                 a.jog.hs.append(h)
-    for b in [C1, C2] + [b for l in levels for b in l.bands]:
+    for b in [C1, C2] + [b for lvl in levels for b in lvl.bands]:
         b.tracks = routeBand(b.hs)
     def bandH(b):
         lines = 2*b.pad + (b.tracks-1)*LSTEP if b.tracks else 0
         return max(44, lines) if b.kind == 'corridor' else b.reserved + max(8 if b.last else 18, lines)
     y = 82 if p['subtitle'] else 58
-    for i, l in enumerate(levels):
-        l.y = y
+    for i, lvl in enumerate(levels):
+        lvl.y = y
         cy = y + HEAD
-        for r, row in enumerate(l.rows):
+        for r, row in enumerate(lvl.rows):
             for b in row:
                 b.y = cy
-            cy += l.rowH[r]
-            band = l.bands[r]
+            cy += lvl.rowH[r]
+            band = lvl.bands[r]
             band.y, band.height = cy, bandH(band)
             cy += band.height
-        if not l.nRows:
+        if not lvl.nRows:
             cy += 12
-        l.height = cy+6-y
-        y += l.height
+        lvl.height = cy+6-y
+        y += lvl.height
         if i < 2:
             b = [C1, C2][i]
             b.y, b.height = y, bandH(b)
             y += b.height
-    trackY = lambda b, t: b.y + b.reserved + b.pad + t*LSTEP
+    def trackY(b, t):
+        return b.y + b.reserved + b.pad + t*LSTEP
     for c in conns:
         c.sy = c.src.y + (c.src.h if c.sEdge == 'bottom' else 0)
         c.ty = c.tgt.y + (c.tgt.h if c.tEdge == 'bottom' else 0)
@@ -492,7 +586,7 @@ def layout(state, GAPX=GAP_MIN):
             ext.append(D(b=b, y=b.y+b.h-12, x1=b.x+b.w,
                          x2=width-MARGIN+14 if rightmost else b.x+b.w+GAPX-6, label=rightmost))
     return D(width=width, LV=LV, levels=levels, conns=conns, C1=C1, C2=C2, blk=blk, ext=ext,
-             needGap=needGap, bottom=y, signalPorts=signalPorts)
+             needGap=needGap, bottom=y, signalPorts=signalPorts, warnings=warnings)
 
 
 def blockLines(b, state):
@@ -516,23 +610,73 @@ def blockLines(b, state):
     return [f"Контроллеров: {it['ctrls']}"]
 
 
+MAX_WARNINGS = 6
+COUNT_FIELDS = {'racks': ('servers',), 'netCabs': ('switches', 'fw', 'cross'),
+                'autoCabs': ('ctrls', 'diN', 'doN', 'aiN', 'aoN')}
+FIELD_LABELS = {'servers': 'Серверов', 'switches': 'Коммутаторов', 'fw': 'Межсетевых экранов',
+                'cross': 'Опт. кроссов', 'ctrls': 'Контроллеров', 'diN': 'Количество DI',
+                'doN': 'Количество DO', 'aiN': 'Количество AI', 'aoN': 'Количество AO'}
+
+
+def countWarnings(state):
+    """Числовые поля, которые не неотрицательные числа (например, 'много' или -5)."""
+    out = []
+    for key, fields in COUNT_FIELDS.items():
+        for it in state[key]:
+            for f in fields:
+                try:
+                    value = float(it[f])
+                    bad = not math.isfinite(value) or value < 0
+                except (TypeError, ValueError):
+                    bad = True
+                if bad:
+                    out.append(f'{fit(it["name"], 24)}: «{FIELD_LABELS[f]}» = {it[f]!r} — '
+                               'ожидается неотрицательное число')
+    return out
+
+
 def buildScheme(state):
     state = normalizeState(state)
     p = state['project']
-    gap = GAP_MIN
+    # Зазор между колонками ищется как неподвижная точка: требование при узком
+    # зазоре завышено сдвинутыми обходами, поэтому одного роста недостаточно —
+    # после стабилизации зазор возвращается к фактически необходимому.
+    gap, m = GAP_MIN, None
+    seen: list[float] = []
     for _ in range(32):
         m = layout(state, gap)
-        if m.needGap <= gap:
+        want = max(GAP_MIN, m.needGap)
+        if abs(want - gap) <= 1e-9:
             break
-        gap = m.needGap
+        if any(abs(want - s) <= 1e-9 for s in seen):
+            gap = max([gap, want, *seen])
+            m = layout(state, gap)
+            break
+        seen.append(gap)
+        gap = want
     else:
         raise ValueError('Не удалось подобрать ширину каналов')
-    blocks = [b for l in m.levels for b in l.blocks]
+    if m.needGap > gap + 1e-9:
+        raise ValueError('Не удалось подобрать ширину каналов')
+    blocks = [b for lvl in m.levels for b in lvl.blocks]
+    shortened = 0
     for b in blocks:
-        b.name, b.lines = b.item['name'], blockLines(b, state)
+        full = b.item['name']
+        lines = blockLines(b, state)
+        # Подписи обрезаются по ширине блока (как fit(name, 28) в core.js),
+        # иначе длинное имя наезжает на соседний блок во всех форматах.
+        b.name = fitText(full, b.w-16, NAME_SIZE, True)
+        b.lines = [fitText(s, b.w-20, LINE_SIZE) for s in lines]
+        shortened += (b.name != full) + sum(1 for s, t in zip(b.lines, lines) if s != t)
         b.fill = '#f1f5f9' if b.kind == 'panel' else '#ffffff'
-    rooms = [D(id='lvl_'+l.key, name=p[{'op': 'operatorName', 'srv': 'serverName', 'auto': 'autoName'}[l.key]],
-               fill=LEVEL_FILL[l.key], x=MARGIN, y=l.y, w=m.width-2*MARGIN, h=l.height) for l in m.levels]
+    warnings = list(m.warnings)
+    if shortened:
+        warnings.append(f'Сокращено подписей, не помещающихся в блок: {shortened}')
+    warnings += countWarnings(state)
+    if len(warnings) > MAX_WARNINGS:
+        warnings = warnings[:MAX_WARNINGS] + [f'…и ещё предупреждений: {len(warnings)-MAX_WARNINGS}']
+    rooms = [D(id='lvl_'+lvl.key, name=p[{'op': 'operatorName', 'srv': 'serverName', 'auto': 'autoName'}[lvl.key]],
+               fill=LEVEL_FILL[lvl.key], x=MARGIN, y=lvl.y, w=m.width-2*MARGIN, h=lvl.height) for lvl in m.levels]
     signals = []
     for b in m.LV.auto.blocks:
         sigs = signalsOf(b.item)
@@ -556,7 +700,7 @@ def buildScheme(state):
     conns = [D({k: c[k] for k in ['src', 'tgt', 'color', 'sx', 'tx', 'sy', 'ty', 'sEdge', 'tEdge', 'pts']}) for c in m.conns]
     return D(width=m.width, height=ny+(20+16*len(lines) if lines else 0)+24, title=p['title'], subtitle=p['subtitle'],
              fileName=fileNameOf(p), rooms=rooms, blocks=blocks, conns=conns, ext=m.ext, signals=signals,
-             legend=legend, notes=notes)
+             legend=legend, notes=notes, warnings=warnings)
 
 
 # Имена Python и совместимые имена исходного JS API.
@@ -569,7 +713,9 @@ clamp_per_row = clampPerRow
 raster_scale = rasterScale
 route_band = routeBand
 build_scheme = buildScheme
+fit_text = fitText
+text_width = textWidth
 
-from .render import to_svg, to_drawio  # noqa: E402
+from .render import to_drawio, to_svg  # noqa: E402
 
 toSvg, toDrawio = to_svg, to_drawio

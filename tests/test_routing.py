@@ -1,9 +1,10 @@
-from copy import deepcopy
 import pytest
-from hypothesis import given, settings, strategies as st, HealthCheck
-from python.scheme_core import *
-from python.validation import layoutProblems
-from tests.projects import loadedState, sampleState, makeRandom
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+
+from structural_scheme.scheme_core import *
+from structural_scheme.validation import layoutProblems
+from tests.projects import loadedState, makeRandom, sampleState
 
 
 def check(s):
@@ -39,17 +40,25 @@ def test_original_random(seed, count):
         assert layoutProblems(m) == [], f'проект №{i}, seed={seed}: {layoutProblems(m)[:5]}'
 
 
+name = st.text(max_size=60)
+count = st.one_of(st.integers(-5, 5000), st.floats(-2, 1e6, allow_nan=False, allow_infinity=False), st.text(max_size=4))
+
+
 @st.composite
 def projects(draw):
     s = normalizeState({})
-    s['project'].update(blocksPerRow=draw(st.integers(1,12)), kvmPanel=draw(st.booleans()),
-                        showSignalCounts=draw(st.booleans()), notesText='Первое\nВторое')
+    s['project'].update(blocksPerRow=draw(st.one_of(st.integers(1,12), st.floats(-1,99,allow_nan=False,allow_infinity=False), st.text(max_size=3))),
+                        kvmPanel=draw(st.booleans()), showSignalCounts=draw(st.booleans()),
+                        title=draw(name), notesText=draw(st.one_of(st.just('Первое\nВторое'), name)),
+                        fileName=draw(st.one_of(st.just('scheme'), name)))
     for k, max_n in [('netCabs',8), ('racks',8), ('opItems',16), ('autoCabs',16)]:
         for i in range(draw(st.integers(0,max_n))):
-            it = {**ITEM_DEFAULTS[k], 'id': k+str(i)}
+            it = {**ITEM_DEFAULTS[k], 'id': k+str(i), 'name': draw(name)}
             for f, default in it.copy().items():
                 if type(default) is bool:
                     it[f] = draw(st.booleans())
+                elif type(default) is int:
+                    it[f] = draw(count)          # числа, строки-числа и мусор
             if k == 'opItems':
                 it['target'] = draw(st.sampled_from([None, 'missing', KVM_PANEL_ID] + [c['id'] for c in s['netCabs']+s['racks']]))
                 it['link'] = draw(st.sampled_from(OP_LINKS))
@@ -108,14 +117,16 @@ def test_interval_coloring_equals_maximum_depth(pairs):
 
 
 def test_validator_detects_original_failure_modes():
-    from python.scheme_core import D
+    from structural_scheme.scheme_core import D
     b = D(id='b',x=20,y=20,w=20,h=20)
     m = D(width=100,height=100,blocks=[b],rooms=[],signals=[],ext=[],notes=None,
           legend=D(x=0,y=80,w=100,h=20,items=[]), conns=[])
     endpoint = dict(id='other')
     m.conns = [dict(src=endpoint,tgt=endpoint,pts=[[0,30],[60,30]]),
-               dict(src=endpoint,tgt=endpoint,pts=[[10,30],[101,30]])]
+               dict(src=endpoint,tgt=endpoint,pts=[[10,30],[101,30]]),
+               dict(src=endpoint,tgt=endpoint,pts=[[5,50],[5,50.005],[15,50]])]
     p = layoutProblems(m)
     assert any('Наложение' in x for x in p)
     assert any('сквозь блок' in x for x in p)
     assert any('выходит за лист' in x for x in p)
+    assert any('Пустой отрезок' in x for x in p)

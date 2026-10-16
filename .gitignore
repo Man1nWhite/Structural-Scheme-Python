@@ -10,3 +10,8 @@ out.*
 .cache/
 test-results/
 playwright-report/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
