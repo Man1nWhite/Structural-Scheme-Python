@@ -1,8 +1,9 @@
 import json
-import math
 from copy import deepcopy
 from xml.etree import ElementTree as ET
+
 import pytest
+
 from python.scheme_core import *
 from tests.projects import sampleState
 

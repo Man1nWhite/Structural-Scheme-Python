@@ -1,14 +1,15 @@
 """Локальный HTTP API. Никаких внешних сервисов и CDN."""
 from pathlib import Path
 from urllib.parse import quote
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from python.scheme_core import (createDefaultState, normalizeState, buildScheme, to_svg,
-                                 ITEM_DEFAULTS, PROJECT_DEFAULTS, makeResolvers)
-from python.export import export_model
 
-app = FastAPI(title='Структурные схемы АСУ ТП', docs_url=None, redoc_url=None)
+from python.export import export_model
+from python.scheme_core import ITEM_DEFAULTS, PROJECT_DEFAULTS, buildScheme, createDefaultState, normalizeState, to_svg
+
+app = FastAPI(title='Структурные схемы АСУ ТП', docs_url=None, redoc_url=None, openapi_url=None)
 STATIC = Path(__file__).parent / 'static'
 app.mount('/static', StaticFiles(directory=STATIC), name='static')
 
@@ -41,9 +42,14 @@ def normalize(raw: dict):
 @app.post('/api/preview')
 def preview(raw: dict):
     state = checked(raw)
-    model = buildScheme(state)
+    try:
+        model = buildScheme(state)
+    except ValueError as e:
+        # Как и экспорт: причина видна пользователю, а не 500 Internal Server Error.
+        raise HTTPException(422, str(e)) from e
     return dict(svg=to_svg(model), width=model['width'], height=model['height'],
-                blocks=len(model['blocks']), conns=len(model['conns']))
+                blocks=len(model['blocks']), conns=len(model['conns']),
+                warnings=model['warnings'])
 
 
 @app.post('/api/export/{format}')

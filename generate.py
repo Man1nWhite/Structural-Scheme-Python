@@ -1,8 +1,10 @@
 """python generate.py project.json -o out.svg"""
 import argparse
+import sys
 from pathlib import Path
-from python.scheme_core import parseState, buildScheme
+
 from python.export import export_model
+from python.scheme_core import buildScheme, parseState
 
 
 def main():
@@ -16,6 +18,8 @@ def main():
         args.output.write_bytes(data)
     except (ValueError, OSError) as e:
         parser.exit(1, f'Ошибка: {e}\n')
+    for warning in model['warnings']:
+        print(f'Предупреждение: {warning}', file=sys.stderr)
     print(f'Сохранено: {args.output} ({model["width"]} × {model["height"]})')
 
 

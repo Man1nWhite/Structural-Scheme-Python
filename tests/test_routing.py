@@ -1,9 +1,10 @@
-from copy import deepcopy
 import pytest
-from hypothesis import given, settings, strategies as st, HealthCheck
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+
 from python.scheme_core import *
 from python.validation import layoutProblems
-from tests.projects import loadedState, sampleState, makeRandom
+from tests.projects import loadedState, makeRandom, sampleState
 
 
 def check(s):
@@ -39,17 +40,25 @@ def test_original_random(seed, count):
         assert layoutProblems(m) == [], f'проект №{i}, seed={seed}: {layoutProblems(m)[:5]}'
 
 
+name = st.text(max_size=60)
+count = st.one_of(st.integers(-5, 5000), st.floats(-2, 1e6, allow_nan=False, allow_infinity=False), st.text(max_size=4))
+
+
 @st.composite
 def projects(draw):
     s = normalizeState({})
-    s['project'].update(blocksPerRow=draw(st.integers(1,12)), kvmPanel=draw(st.booleans()),
-                        showSignalCounts=draw(st.booleans()), notesText='Первое\nВторое')
+    s['project'].update(blocksPerRow=draw(st.one_of(st.integers(1,12), st.floats(-1,99,allow_nan=False,allow_infinity=False), st.text(max_size=3))),
+                        kvmPanel=draw(st.booleans()), showSignalCounts=draw(st.booleans()),
+                        title=draw(name), notesText=draw(st.one_of(st.just('Первое\nВторое'), name)),
+                        fileName=draw(st.one_of(st.just('scheme'), name)))
     for k, max_n in [('netCabs',8), ('racks',8), ('opItems',16), ('autoCabs',16)]:
         for i in range(draw(st.integers(0,max_n))):
-            it = {**ITEM_DEFAULTS[k], 'id': k+str(i)}
+            it = {**ITEM_DEFAULTS[k], 'id': k+str(i), 'name': draw(name)}
             for f, default in it.copy().items():
                 if type(default) is bool:
                     it[f] = draw(st.booleans())
+                elif type(default) is int:
+                    it[f] = draw(count)          # числа, строки-числа и мусор
             if k == 'opItems':
                 it['target'] = draw(st.sampled_from([None, 'missing', KVM_PANEL_ID] + [c['id'] for c in s['netCabs']+s['racks']]))
                 it['link'] = draw(st.sampled_from(OP_LINKS))

@@ -1,9 +1,9 @@
 """Настоящий HTTP-сервер и изолированный Chromium-контекст на каждый тест."""
 import os
 import re
-from pathlib import Path
 import socket
 import threading
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest

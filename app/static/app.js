@@ -13,7 +13,7 @@ async function api(url, data) {
 }
 function persist() {try{localStorage.setItem(KEY,JSON.stringify({format:'structural-scheme',version:1,...state}));}catch(e){error(new Error('Не удалось сохранить в браузере. Скачайте JSON: '+e.message));}}
 function changed() {persist();const rev=++revision;clearTimeout(timer);$('#status').textContent='Перестроение…';timer=setTimeout(()=>preview(rev),220);}
-async function preview(rev=revision) {try{const m=await(await api('/api/preview',state)).json();if(rev!==revision)return;$('#preview').innerHTML=m.svg;zoom();$('#status').textContent=`${m.width} × ${m.height} px · Блоков: ${m.blocks} · Связей: ${m.conns}`;}catch(e){if(rev===revision){error(e);$('#status').textContent='Ошибка построения';}}}
+async function preview(rev=revision) {try{const m=await(await api('/api/preview',state)).json();if(rev!==revision)return;$('#preview').innerHTML=m.svg;zoom();const w=m.warnings&&m.warnings.length?' · '+m.warnings.join(' · '):'';$('#status').textContent=`${m.width} × ${m.height} px · Блоков: ${m.blocks} · Связей: ${m.conns}${w}`;$('#status').classList.toggle('warn',Boolean(w));}catch(e){if(rev===revision){error(e);$('#status').textContent='Ошибка построения';}}}
 function zoom() {const svg=$('#preview svg');if(!svg)return;const v=$('#zoom').value;const w=Number(svg.getAttribute('width')),h=Number(svg.getAttribute('height'));let scale=v==='fit'?Math.min(1,Math.max(100,$('#preview').clientWidth-48)/w):Number(v);svg.style.width=(w*scale)+'px';svg.style.height=(h*scale)+'px';}
 function optionsFor(key,item) {
   if(key==='type')return ['АРМ','Принтер','Панель управления'].map(x=>[x,x]);

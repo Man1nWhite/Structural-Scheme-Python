@@ -1,9 +1,11 @@
-from io import BytesIO
 import subprocess
 import sys
+from io import BytesIO
 from xml.etree import ElementTree as ET
-from PIL import Image
+
 from fastapi.testclient import TestClient
+from PIL import Image
+
 from app import app
 from python.scheme_core import createDefaultState, serializeState
 
@@ -26,6 +28,26 @@ def test_offline_assets_and_api():
     assert client.post('/api/normalize',json={'format':'bad'}).status_code == 422
     assert client.post('/api/export/bad',json=s).status_code == 422
     assert client.post('/api/normalize',content='broken',headers={'content-type':'application/json'}).status_code == 422
+
+
+def test_preview_reports_warnings_and_layout_errors(monkeypatch):
+    s = createDefaultState()
+    s['project']['blocksPerRow'] = 1
+    s['racks'][0]['servers'] = 'много'
+    s['opItems'][0]['name'] = 'АРМ оператора центрального пульта управления установки №12'
+    r = client.post('/api/preview', json=s)
+    assert r.status_code == 200
+    warnings = r.json()['warnings']
+    assert any('«Серверов»' in w for w in warnings)
+    assert any('Сокращено подписей' in w for w in warnings)
+    assert client.get('/openapi.json').status_code == 404
+
+    def broken(state):
+        raise ValueError('Тест: невозможно уложить связи')
+    monkeypatch.setattr('app.buildScheme', broken)
+    r = client.post('/api/preview', json=createDefaultState())
+    assert r.status_code == 422
+    assert 'невозможно уложить связи' in r.json()['detail']
 
 
 def test_all_exports():
@@ -53,3 +75,9 @@ def test_cli(tmp_path):
         assert out.stat().st_size > 100
     bad = subprocess.run([sys.executable,'generate.py',str(project),'-o',str(tmp_path/'out.bad')],capture_output=True)
     assert bad.returncode == 1
+    loud = createDefaultState()
+    loud['racks'][0]['servers'] = 'много'
+    project.write_text(serializeState(loud), encoding='utf-8')
+    r = subprocess.run([sys.executable,'generate.py',str(project),'-o',str(tmp_path/'warn.svg')],capture_output=True)
+    assert r.returncode == 0
+    assert 'Предупреждение' in r.stderr.decode('utf-8')
