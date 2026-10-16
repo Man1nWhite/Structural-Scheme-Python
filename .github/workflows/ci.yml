@@ -23,8 +23,12 @@ jobs:
         # прямо в PR, не только в скачиваемом логе шага.
         run: |
           log="${RUNNER_TEMP:-/tmp}/pytest.log"
+          # GitHub запускает bash с -e, поэтому без set +e вывод pytest не попадёт
+          # ни в лог шага, ни в аннотации: шаг оборвётся на первой ошибке.
+          set +e
           python -m pytest -q -m "not browser" --tb=line --cov --cov-report=term-missing > "$log" 2>&1
           status=$?
+          set -e
           cat "$log"
           if [ $status -ne 0 ]; then
             tail -n 40 "$log" | sed 's/^/::error::/'
