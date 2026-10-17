@@ -1,4 +1,7 @@
 """python generate.py project.json -o out.svg"""
+
+from __future__ import annotations
+
 import argparse
 import sys
 from pathlib import Path
@@ -7,7 +10,7 @@ from structural_scheme.export import export_model
 from structural_scheme.scheme_core import buildScheme, parseState
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description='Генератор структурных схем АСУ ТП')
     parser.add_argument('project', type=Path, help='Проект JSON (совместим с JS v1)')
     parser.add_argument('-o', '--output', required=True, type=Path, help='Файл .svg/.png/.jpg/.drawio')
@@ -23,5 +26,5 @@ def main():
     print(f'Сохранено: {args.output} ({model["width"]} × {model["height"]})')
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma: no cover
     main()

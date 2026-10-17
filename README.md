@@ -98,11 +98,15 @@ svg = to_svg(model)
 xml = to_drawio(model)
 ```
 
-Модули: `structural_scheme/scheme_core.py` (модель и геометрия), `render.py`,
-`export.py`, `validation.py`, `app.py` (FastAPI) и `static/`. Устанавливается
-ровно один пакет — `structural_scheme`, поэтому в `site-packages` не появляются
-общие имена `python` и `app`. После обновления версии репозитория повторите
-`python -m pip install -e .`, чтобы отображение пакета обновилось.
+Модули: `structural_scheme/constants.py` (константы и defaults), `text_utils.py`
+(типы `D`/`TypedDict`, ширина текста и масштаб), `normalize.py` (нормализация и
+сериализация JSON v1, резолверы), `routing.py` (интервальная раскраска, реестр
+портов `PortRegistry`, раскладка и `buildScheme`), `scheme_core.py` (единый фасад
+совместимости), `render.py`, `export.py`, `validation.py`, `app.py` (FastAPI) и
+`static/`. Пакет снабжён маркером `py.typed`. Устанавливается ровно один пакет —
+`structural_scheme`, поэтому в `site-packages` не появляются общие имена `python`
+и `app`. После обновления версии репозитория повторите `python -m pip install -e .`,
+чтобы отображение пакета обновилось.
 
 Модель — JSON-совместимые словари: `width`, `height`, `rooms`, `blocks`, `conns`,
 `ext`, `signals`, `legend`, `notes`, `warnings` (список предупреждений для

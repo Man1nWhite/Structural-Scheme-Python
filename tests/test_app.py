@@ -30,7 +30,7 @@ def test_offline_assets_and_api():
     assert client.post('/api/normalize',content='broken',headers={'content-type':'application/json'}).status_code == 422
 
 
-def test_module_main_uses_host_port_and_env(monkeypatch):
+def test_module_main_uses_host_port_and_env(monkeypatch, capsys):
     from structural_scheme import __main__ as runner
     calls = {}
     monkeypatch.setattr(runner.uvicorn, 'run',
@@ -38,14 +38,18 @@ def test_module_main_uses_host_port_and_env(monkeypatch):
     monkeypatch.setattr(sys, 'argv', ['app', '--host', '127.0.0.1', '--port', '8123'])
     runner.main()
     assert calls == {'target': 'structural_scheme.app:app', 'host': '127.0.0.1', 'port': 8123}
+    assert 'Внимание' not in capsys.readouterr().err
     monkeypatch.setattr(sys, 'argv', ['app'])
     monkeypatch.setenv('PORT', '9001')
     runner.main()
     # По умолчанию слушаем 0.0.0.0 (в том числе для preview в Arena) и берём PORT из окружения.
     assert calls == {'target': 'structural_scheme.app:app', 'host': '0.0.0.0', 'port': 9001}
+    assert '0.0.0.0' in capsys.readouterr().err
 
 
 def test_block_limit_is_enforced_by_api():
+    from concurrent.futures import ThreadPoolExecutor
+
     s = createDefaultState()
     s['opItems'] = [{**ITEM_DEFAULTS['opItems'], 'id': f'o{i}'} for i in range(501)]
     r = client.post('/api/preview', json=s)
@@ -55,6 +59,11 @@ def test_block_limit_is_enforced_by_api():
     s['racks'] = [{**ITEM_DEFAULTS['racks'], 'id': f'r{i}', 'servers': 1} for i in range(500)]
     # Ровно 500 блоков — предел веб-API; лимит защищает локальный процесс.
     assert client.post('/api/preview', json=s).status_code == 200
+    # 4 одновременных превью не конфликтуют по состоянию.
+    default_state = createDefaultState()
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        responses = list(pool.map(lambda _: client.post('/api/preview', json=default_state), range(4)))
+    assert all(res.status_code == 200 and res.json()['blocks'] == 9 for res in responses)
 
 
 def test_preview_reports_warnings_and_layout_errors(monkeypatch):
@@ -77,12 +86,13 @@ def test_preview_reports_warnings_and_layout_errors(monkeypatch):
     assert 'невозможно уложить связи' in r.json()['detail']
 
 
-def test_all_exports():
+def test_all_exports(monkeypatch):
     s = createDefaultState()
     for f in ['svg','drawio','png','jpg']:
         r = client.post('/api/export/'+f,json=s)
         assert r.status_code == 200
         assert "filename*=UTF-8''" in r.headers['content-disposition']
+        assert 'filename="' in r.headers['content-disposition']
         if f in ['svg','drawio']:
             ET.fromstring(r.content)
         else:
@@ -90,6 +100,12 @@ def test_all_exports():
                 assert im.format == ('PNG' if f == 'png' else 'JPEG')
                 assert im.width*im.height <= 16_000_000
                 assert im.getbbox()
+    monkeypatch.setattr('structural_scheme.export.resvg_py.svg_to_bytes', lambda **kw: b'')
+    assert client.post('/api/export/png', json=s).status_code == 422
+    def fail_resvg(**kw):
+        raise RuntimeError('resvg error')
+    monkeypatch.setattr('structural_scheme.export.resvg_py.svg_to_bytes', fail_resvg)
+    assert client.post('/api/export/png', json=s).status_code == 422
 
 
 def test_cli(tmp_path):
@@ -102,6 +118,8 @@ def test_cli(tmp_path):
         assert out.stat().st_size > 100
     bad = subprocess.run([sys.executable,'generate.py',str(project),'-o',str(tmp_path/'out.bad')],capture_output=True)
     assert bad.returncode == 1
+    missing = subprocess.run([sys.executable,'generate.py',str(tmp_path/'missing.json'),'-o',str(tmp_path/'out.svg')],capture_output=True)
+    assert missing.returncode == 1
     loud = createDefaultState()
     loud['racks'][0]['servers'] = 'много'
     project.write_text(serializeState(loud), encoding='utf-8')

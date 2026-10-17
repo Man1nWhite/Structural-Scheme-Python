@@ -19,6 +19,7 @@ def test_roundtrip_and_schema():
     s['project'].update(blocksPerRow='99', unknown='drop')
     s['opItems'][0]['id'] = KVM_PANEL_ID
     s['opItems'][1]['id'] = s['opItems'][2]['id']
+    s['opItems'].append('not-a-dict')
     s['racks'][0]['servers'] = '3'
     n = normalizeState(s)
     assert n['project']['blocksPerRow'] == '12'
@@ -27,7 +28,10 @@ def test_roundtrip_and_schema():
     assert len(set(ids)) == len(ids)
     assert KVM_PANEL_ID not in ids
     assert n['racks'][0]['servers'] == '3'
-    assert normalizeState({'project': {'kvmPanel': 'false', 'title': False}})['project'] == PROJECT_DEFAULTS
+    assert normalizeState({'project': {'kvmPanel': 'false', 'title': False, 'blocksPerRow': 'abc'}})['project'] == {
+        **PROJECT_DEFAULTS,
+        'blocksPerRow': 1,
+    }
 
 
 @pytest.mark.parametrize('text', ['bad', '[]', '{"format":"other"}', '{"version":99}'])
@@ -75,9 +79,15 @@ def test_model_serializable_and_renderers_do_not_mutate():
     assert m['title'] in svg_text and m['title'] in unescape(values)
     cells = list(drawio.iter('mxCell'))
     assert len({c.get('id') for c in cells}) == len(cells)
-    for c, edge in zip(m['conns'], [c for c in cells if c.get('edge') == '1']):
+    for c, edge in zip(m['conns'], [c for c in cells if c.get('edge') == '1'], strict=False):
         points = edge.findall('./mxGeometry/Array/mxPoint')
         assert [(float(p.get('x')),float(p.get('y'))) for p in points] == [tuple(p) for p in c['pts'][1:-1]]
+    s_no_sub = sampleState()
+    s_no_sub['project']['subtitle'] = ''
+    s_no_sub['netCabs'][0]['fw'] = 'нет'
+    m_no_sub = buildScheme(s_no_sub)
+    assert ET.fromstring(to_svg(m_no_sub)).tag.endswith('svg')
+    assert ET.fromstring(to_drawio(m_no_sub)).tag == 'mxfile'
 
 
 def test_route_band_disjoint_and_overlapping():
@@ -85,3 +95,44 @@ def test_route_band_disjoint_and_overlapping():
     assert routeBand(hs) == 2
     assert hs[0]['track'] != hs[2]['track']
     assert routeBand([]) == 0
+
+
+def test_consts_and_port_registry_and_filename():
+    assert CONSTS['BW'] == BW == 190
+    assert CONSTS['GAP_MIN'] == GAP_MIN == 30
+    d = D(a=1)
+    d.b = 2
+    assert d['b'] == 2 and d.a == 1
+    with pytest.raises(AttributeError):
+        _ = d.missing_attr
+    assert len(fileNameOf({'fileName': 'x' * 200})) == 120
+    assert fileNameOf({'fileName': ''}) == 'scheme'
+
+    reg = PortRegistry()
+    # Непересекающиеся по Y интервалы переиспользуют ту же координату X.
+    assert reg.seat(50.0, 0.0, 10.0, 40.0, 60.0) == 50.0
+    assert reg.seat(50.0, 20.0, 30.0, 40.0, 60.0) == 50.0
+    # Пересекающийся по Y интервал сдвигается на шаг SLOT.
+    shifted = reg.seat(50.0, 5.0, 15.0, 40.0, 60.0)
+    assert abs(shifted - 50.0) >= SLOT - 1e-6
+
+
+def test_build_scheme_gap_failure_guards(monkeypatch):
+    from structural_scheme import routing
+
+    s = createDefaultState()
+    monkeypatch.setattr(routing, 'layout', lambda st, gap=GAP_MIN: D(needGap=gap + 10.0))
+    with pytest.raises(ValueError, match='Не удалось подобрать ширину каналов'):
+        routing.buildScheme(s)
+
+    calls = 0
+
+    def oscillating(st, gap=GAP_MIN):
+        nonlocal calls
+        calls += 1
+        return D(needGap=60.0 if calls == 1 else (30.0 if calls == 2 else 999.0))
+
+    monkeypatch.setattr(routing, 'layout', oscillating)
+    with pytest.raises(ValueError, match='Не удалось подобрать ширину каналов'):
+        routing.buildScheme(s)
+
