@@ -1,13 +1,20 @@
 """Экспорт модели в векторные и растровые форматы без браузера."""
+
+from __future__ import annotations
+
+import math
 from io import BytesIO
+from typing import Any
 
 import resvg_py
 from PIL import Image
 
-from .scheme_core import RASTER_MAX_PIXELS, rasterScale, to_drawio, to_svg
+from .constants import RASTER_MAX_PIXELS, RASTER_MAX_SIDE
+from .render import to_drawio, to_svg
+from .text_utils import rasterScale
 
 
-def export_model(model, format):
+def export_model(model: dict[str, Any], format: str) -> tuple[bytes, str]:
     format = format.lower().lstrip('.')
     if format == 'svg':
         return to_svg(model).encode('utf-8'), 'image/svg+xml'
@@ -15,12 +22,21 @@ def export_model(model, format):
         return to_drawio(model).encode('utf-8'), 'application/xml'
     if format not in ('png', 'jpg', 'jpeg'):
         raise ValueError('Поддерживаются SVG, PNG, JPG и Draw.io.')
-    # rasterScale совместим с JS API; жёсткие лимиты серверного экспорта
-    # действуют даже когда совместимый масштаб упирается в минимум 0.1.
-    w, h = model['width'], model['height']
-    scale = min(rasterScale(w, h), (RASTER_MAX_PIXELS/max(1,w*h))**.5, 16384/max(w,h))
-    png = resvg_py.svg_to_bytes(svg_string=to_svg(model), width=max(1,int(w*scale)),
-                                height=max(1,int(h*scale)), background='#ffffff')
+    # rasterScale совместим с JS API (масштаб не ниже 0.1); жёсткие лимиты
+    # серверного экспорта (16Mpx и 16384px по стороне) действуют всегда.
+    w, h = float(model['width']), float(model['height'])
+    hard_pixel_scale = math.sqrt(RASTER_MAX_PIXELS / max(1.0, w * h))
+    hard_side_scale = RASTER_MAX_SIDE / max(1.0, w, h)
+    scale = min(rasterScale(w, h), hard_pixel_scale, hard_side_scale)
+    try:
+        png = resvg_py.svg_to_bytes(
+            svg_string=to_svg(model),
+            width=max(1, int(w * scale)),
+            height=max(1, int(h * scale)),
+            background='#ffffff',
+        )
+    except Exception as e:
+        raise ValueError('Не удалось создать растровое изображение.') from e
     if not png:
         raise ValueError('Не удалось создать растровое изображение.')
     if format == 'png':

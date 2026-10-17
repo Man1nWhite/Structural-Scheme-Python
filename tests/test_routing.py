@@ -118,15 +118,27 @@ def test_interval_coloring_equals_maximum_depth(pairs):
 
 def test_validator_detects_original_failure_modes():
     from structural_scheme.scheme_core import D
-    b = D(id='b',x=20,y=20,w=20,h=20)
-    m = D(width=100,height=100,blocks=[b],rooms=[],signals=[],ext=[],notes=None,
-          legend=D(x=0,y=80,w=100,h=20,items=[]), conns=[])
+    b = D(id='b',x=20,y=20,w=20,h=20,name='Слишком длинное имя блока для двадцати пикселей',lines=['Очень длинная строка описания'])
+    b2 = D(id='b2',x=90,y=20,w=20,h=20,name='OK',lines=[])
+    m = D(width=100,height=100,blocks=[b, b2],rooms=[],signals=[],
+          ext=[D(b=b,x1=40,x2=110,y=30,label=True)],
+          notes=D(x=10,y=90,lines=['Строка 1','Строка 2']),
+          legend=D(x=0,y=80,w=100,h=20,items=[D(name='KVM',color='#000',x=50,y=90)]), conns=[])
     endpoint = dict(id='other')
     m.conns = [dict(src=endpoint,tgt=endpoint,pts=[[0,30],[60,30]]),
                dict(src=endpoint,tgt=endpoint,pts=[[10,30],[101,30]]),
-               dict(src=endpoint,tgt=endpoint,pts=[[5,50],[5,50.005],[15,50]])]
+               dict(src=endpoint,tgt=endpoint,pts=[[5,50],[5,50.005],[15,50]]),
+               dict(src=endpoint,tgt=endpoint,pts=[[5,60],[15,70]])]
     p = layoutProblems(m)
     assert any('Наложение' in x for x in p)
     assert any('сквозь блок' in x for x in p)
     assert any('выходит за лист' in x for x in p)
     assert any('Пустой отрезок' in x for x in p)
+    assert any('Неортогональный отрезок' in x for x in p)
+    assert any('Внешняя связь выходит за лист' in x for x in p)
+    assert any('Внешняя связь проходит сквозь блок' in x for x in p)
+    assert any('Объект выходит за лист' in x for x in p)
+    assert any('Название блока b шире блока' in x for x in p)
+    assert any('Строка подписи блока b шире блока' in x for x in p)
+    assert any('Элемент легенды выходит за рамку' in x for x in p)
+    assert any('Примечания выходят за лист' in x for x in p)

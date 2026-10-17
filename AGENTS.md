@@ -3,7 +3,11 @@
 Это Python-замена исходного генератора АСУ ТП. Python >=3.11, Node не нужен.
 Язык интерфейса и документации — русский. Не создавайте релизы и changelog.
 
-- `structural_scheme/scheme_core.py`: модель v1, нормализация, логические связи, раскладка и маршруты.
+- `structural_scheme/constants.py`: геометрические, цветовые и форматные константы, `CONSTS`, `PROJECT_DEFAULTS`, `ITEM_DEFAULTS`.
+- `structural_scheme/text_utils.py`: словарь `D`, `TypedDict`-схемы модели, ширина и обрезка подписей (`textWidth`, `fitText`), масштаб растра.
+- `structural_scheme/normalize.py`: нормализация/сериализация JSON v1, фабрики элементов, `makeResolvers`, проверка числовых полей (`countWarnings`).
+- `structural_scheme/routing.py`: раскрашивание интервалов (`assign_gap_slots`), реестр портов (`PortRegistry`), `routeBand`, `layout` и `buildScheme`.
+- `structural_scheme/scheme_core.py`: фасад обратной совместимости, реэкспортирующий все символы ядра.
 - `structural_scheme/render.py`: SVG и Draw.io **только из одной готовой модели**, без новой геометрии.
 - `structural_scheme/export.py`: векторный экспорт и растры через resvg/Pillow, без браузера и системного Cairo.
 - `structural_scheme/validation.py`: Shapely/STRtree, инварианты из оригинального helpers.js.
