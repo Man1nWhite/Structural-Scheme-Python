@@ -3,6 +3,8 @@ import sys
 from io import BytesIO
 from xml.etree import ElementTree as ET
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -45,6 +47,39 @@ def test_module_main_uses_host_port_and_env(monkeypatch, capsys):
     # По умолчанию слушаем 0.0.0.0 (в том числе для preview в Arena) и берём PORT из окружения.
     assert calls == {'target': 'structural_scheme.app:app', 'host': '0.0.0.0', 'port': 9001}
     assert '0.0.0.0' in capsys.readouterr().err
+
+
+def test_export_filename_fallback_for_cyrillic_name():
+    s = createDefaultState()
+    s['project']['fileName'] = 'схема'
+    r = client.post('/api/export/svg', json=s)
+    assert r.status_code == 200
+    # ASCII-fallback не должен схлопываться в пустое имя '.svg'.
+    assert 'filename="scheme.svg"' in r.headers['content-disposition']
+    assert "filename*=UTF-8''%D1%81%D1%85%D0%B5%D0%BC%D0%B0.svg" in r.headers['content-disposition']
+    s['project']['fileName'] = 'проект А'
+    r = client.post('/api/export/svg', json=s)
+    assert 'filename="scheme.svg"' in r.headers['content-disposition']
+
+
+def test_block_limit_counts_only_dict_items():
+    # Не-словари нормализация отбрасывает, а не считает блоками: пред-подсчёт
+    # лимита обязан сохранять эту семантику.
+    payload = {'opItems': ['мусор'] * 501, 'racks': [], 'netCabs': [], 'autoCabs': []}
+    assert client.post('/api/preview', json=payload).status_code == 200
+
+
+def test_checked_rechecks_limit_after_normalize(monkeypatch):
+    # Пост-проверка в checked — защита на случай, если нормализация когда-нибудь
+    # начнёт добавлять элементы: лимит обязан сработать и после неё.
+    from structural_scheme import app as app_module
+
+    big = {'project': {}, 'opItems': [{}] * 501, 'racks': [], 'netCabs': [], 'autoCabs': []}
+    monkeypatch.setattr(app_module, 'normalizeState', lambda raw: big)
+    with pytest.raises(HTTPException) as exc:
+        app_module.checked({})
+    assert exc.value.status_code == 422
+    assert '500 блоков' in str(exc.value.detail)
 
 
 def test_block_limit_is_enforced_by_api():

@@ -47,6 +47,16 @@ def defaults() -> dict[str, Any]:
 
 def checked(raw: dict[str, Any]) -> dict[str, Any]:
     try:
+        # Дешёвый пред-подсчёт до нормализации: блоком становится только
+        # элемент-словарь, поэтому семантика лимита не меняется, а огромный
+        # список отклоняется без deepcopy и генерации uid на каждый элемент.
+        raw_blocks = 0
+        for k in ITEM_DEFAULTS:
+            items = raw.get(k)
+            if isinstance(items, list):
+                raw_blocks += sum(1 for item in items if isinstance(item, dict))
+        if raw_blocks > 500:
+            raise ValueError('Допускается не более 500 блоков в одном проекте.')
         state = normalizeState(raw)
         if sum(len(state[k]) for k in ITEM_DEFAULTS) > 500:
             raise ValueError('Допускается не более 500 блоков в одном проекте.')
@@ -88,7 +98,11 @@ def export(format: str, raw: dict[str, Any]) -> Response:
         raise HTTPException(422, str(e)) from e
     ext = format.lower().lstrip('.')
     full_name = f"{model['fileName']}.{ext}"
-    ascii_fallback = re.sub(r'[^A-Za-z0-9_.-]+', '_', full_name).strip('_') or f'scheme.{ext}'
+    ascii_fallback = re.sub(r'[^A-Za-z0-9_.-]+', '_', full_name)
+    # Чисто кириллическое имя превращается в '____.svg': strip('_') съедал бы
+    # и эти подстановки, оставляя пустое имя '.svg' у основного сценария.
+    if not ascii_fallback.rsplit('.', 1)[0].strip('_.'):
+        ascii_fallback = f'scheme.{ext}'
     encoded = quote(full_name)
     disposition = f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{encoded}'
     return Response(data, media_type=mime, headers={'Content-Disposition': disposition})

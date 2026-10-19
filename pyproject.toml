@@ -61,7 +61,7 @@ branch = true
 
 [tool.coverage.report]
 show_missing = true
-# Измерено >98% (branch). Порог 95 — защита от потери целых групп проверок.
+# Измерено 100% (branch). Порог 95 — защита от потери целых групп проверок.
 fail_under = 95
 
 [tool.pytest.ini_options]
