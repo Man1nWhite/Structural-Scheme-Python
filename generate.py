@@ -6,22 +6,18 @@ import argparse
 import sys
 from pathlib import Path
 
-from structural_scheme.export import export_bundle, export_model
+from structural_scheme.export import export_model
 from structural_scheme.scheme_core import buildScheme, parseState
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Генератор структурных схем АСУ ТП')
     parser.add_argument('project', type=Path, help='Проект JSON (совместим с JS v1)')
-    parser.add_argument('-o', '--output', required=True, type=Path, help='Файл .svg/.png/.jpg/.drawio/.zip')
+    parser.add_argument('-o', '--output', required=True, type=Path, help='Файл .svg/.png/.jpg/.drawio')
     args = parser.parse_args()
     try:
-        state = parseState(args.project.read_text(encoding='utf-8-sig'))
-        model = buildScheme(state)
-        if args.output.suffix.lower() == '.zip':
-            data, _ = export_bundle(state, model)
-        else:
-            data, _ = export_model(model, args.output.suffix)
+        model = buildScheme(parseState(args.project.read_text(encoding='utf-8-sig')))
+        data, _ = export_model(model, args.output.suffix)
         args.output.write_bytes(data)
     except (ValueError, OSError) as e:
         parser.exit(1, f'Ошибка: {e}\n')
