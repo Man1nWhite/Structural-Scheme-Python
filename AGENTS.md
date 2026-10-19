@@ -5,18 +5,14 @@
 
 - `structural_scheme/constants.py`: геометрические, цветовые и форматные константы, `CONSTS`, `PROJECT_DEFAULTS`, `ITEM_DEFAULTS`.
 - `structural_scheme/text_utils.py`: словарь `D`, `TypedDict`-схемы модели, ширина и обрезка подписей (`textWidth`, `fitText`), масштаб растра.
-- `structural_scheme/normalize.py`: нормализация/сериализация JSON v1, фабрики элементов, `makeResolvers`, проверка числовых полей (`countWarnings`), шаблоны быстрого старта (`createPresetState`, `listPresets`, `PRESET_META`).
+- `structural_scheme/normalize.py`: нормализация/сериализация JSON v1, фабрики элементов, `makeResolvers`, проверка числовых полей (`countWarnings`).
 - `structural_scheme/routing.py`: раскрашивание интервалов (`assign_gap_slots`), реестр портов (`PortRegistry`), `routeBand`, `layout` и `buildScheme`.
 - `structural_scheme/scheme_core.py`: фасад обратной совместимости, реэкспортирующий все символы ядра.
 - `structural_scheme/render.py`: SVG и Draw.io **только из одной готовой модели**, без новой геометрии.
-- `structural_scheme/export.py`: векторный экспорт и растры через resvg/Pillow, без браузера и системного Cairo; `export_bundle` собирает ZIP со всеми форматами и JSON проекта.
+- `structural_scheme/export.py`: векторный экспорт и растры через resvg/Pillow, без браузера и системного Cairo.
 - `structural_scheme/validation.py`: Shapely/STRtree, инварианты из оригинального helpers.js.
 - `structural_scheme/app.py` + `static/`: FastAPI + vanilla JS/CSS, локальные ресурсы,
-  относительные HTTP URL. UI рассчитан на «один клик»: шаблоны быстрого старта,
-  отмена/повтор действий, дублирование блоков, перетаскивание JSON, экспорт ZIP.
-  Browser-тесты держатся на селекторах `#preview`, `#status`, `#error`, `#file`,
-  `#zoom`, классах `.card`/`.items` и точных именах кнопок/подписей полей —
-  не переименовывайте их без обновления `tests/browser/`. Устанавливается только пакет `structural_scheme`; файл `app.py`
+  относительные HTTP URL. Устанавливается только пакет `structural_scheme`; файл `app.py`
   в корне — совместимость для `python -m app`, добавляя публичную функцию — экспортируйте
   её в `structural_scheme/__init__.py` (там же `__all__`), это публичный API.
 - `tests/`: pytest, точный перенос генератора routing.test.js (с арифметикой JS double),
