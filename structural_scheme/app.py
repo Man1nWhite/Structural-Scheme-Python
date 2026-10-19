@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from structural_scheme.export import export_model
+from structural_scheme.export import export_bundle, export_model
 from structural_scheme.scheme_core import (
     AUTO_UPLINKS,
     ITEM_DEFAULTS,
@@ -21,6 +21,7 @@ from structural_scheme.scheme_core import (
     PROJECT_DEFAULTS,
     buildScheme,
     createDefaultState,
+    listPresets,
     normalizeState,
     to_svg,
 )
@@ -43,6 +44,12 @@ def defaults() -> dict[str, Any]:
         project=PROJECT_DEFAULTS,
         options=dict(type=OP_TYPES, link=OP_LINKS, uplink=AUTO_UPLINKS, kvmPanelId=KVM_PANEL_ID),
     )
+
+
+@app.get('/api/presets')
+def presets() -> dict[str, Any]:
+    """Готовые проекты для быстрого старта: один клик в интерфейсе."""
+    return dict(presets=listPresets())
 
 
 def checked(raw: dict[str, Any]) -> dict[str, Any]:
@@ -91,12 +98,17 @@ def preview(raw: dict[str, Any]) -> dict[str, Any]:
 @app.post('/api/export/{format}')
 def export(format: str, raw: dict[str, Any]) -> Response:
     state = checked(raw)
+    ext = format.lower().lstrip('.')
     try:
         model = buildScheme(state)
-        data, mime = export_model(model, format)
+        if ext in ('all', 'zip'):
+            # Один клик — архив сразу со всеми форматами и JSON проекта.
+            data, mime = export_bundle(state, model)
+            ext = 'zip'
+        else:
+            data, mime = export_model(model, format)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
-    ext = format.lower().lstrip('.')
     full_name = f"{model['fileName']}.{ext}"
     ascii_fallback = re.sub(r'[^A-Za-z0-9_.-]+', '_', full_name)
     # Чисто кириллическое имя превращается в '____.svg': strip('_') съедал бы

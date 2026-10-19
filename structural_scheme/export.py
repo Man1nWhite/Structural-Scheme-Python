@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import re
+import zipfile
 from io import BytesIO
 from typing import Any
 
@@ -10,6 +12,7 @@ import resvg_py
 from PIL import Image
 
 from .constants import RASTER_MAX_PIXELS, RASTER_MAX_SIDE
+from .normalize import serializeState
 from .render import to_drawio, to_svg
 from .text_utils import rasterScale
 
@@ -45,3 +48,19 @@ def export_model(model: dict[str, Any], format: str) -> tuple[bytes, str]:
     with Image.open(BytesIO(png)) as image:
         image.convert('RGB').save(out, format='JPEG', quality=95)
     return out.getvalue(), 'image/jpeg'
+
+
+def export_bundle(state: dict[str, Any], model: dict[str, Any]) -> tuple[bytes, str]:
+    """Один ZIP со всеми форматами (SVG, PNG, JPG, Draw.io) и JSON проекта.
+
+    Имя файла внутри архива — производное от model['fileName'], очищенное
+    от разделителей путей, чтобы архив нельзя было направить в другой каталог.
+    """
+    base = re.sub(r'[^\w() -]+', '_', str(model.get('fileName') or 'scheme')).strip(' _') or 'scheme'
+    out = BytesIO()
+    with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as archive:
+        for fmt, ext in [('svg', 'svg'), ('png', 'png'), ('jpg', 'jpg'), ('drawio', 'drawio')]:
+            data, _ = export_model(model, fmt)
+            archive.writestr(f'{base}.{ext}', data)
+        archive.writestr(f'{base}.json', serializeState(state).encode('utf-8'))
+    return out.getvalue(), 'application/zip'
