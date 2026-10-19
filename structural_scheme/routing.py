@@ -25,6 +25,7 @@ from .constants import (
     LSTEP,
     MARGIN,
     MAX_GAP_ITERS,
+    MAX_PORTS_PER_EDGE,
     MAX_WARNINGS,
     NAME_BY_COLOR,
     NAME_SIZE,
@@ -139,7 +140,12 @@ class PortRegistry:
     ) -> float | None:
         """Ближайшая свободная координата от start в одну сторону (без кандидатов)."""
         pos = start
-        for _ in range(512):
+        # Каждый шаг перепрыгивает хотя бы один накрывающий интервал, поэтому
+        # попыток не может быть больше числа занятых записей (+ запас на отступ).
+        # Жёсткая константа 512 обрывала поиск в длинном зазоре: проект с 490
+        # портами у одного шкафа падал с «Недостаточно места для портов блока»,
+        # хотя физический предел грани (559 портов) ещё не достигнут.
+        for _ in range(len(self.occupied) + 512):
             if direction > 0 and pos > upper + 1e-8:
                 return None
             if direction < 0 and pos < lower - 1e-8:
@@ -154,7 +160,10 @@ class PortRegistry:
             # Перепрыгиваем весь накрывающий интервал: следующая проверка
             # точная, поэтому шагов ровно столько, сколько слияний до места.
             pos = max(px + sep for px, sep in covering) if direction > 0 else min(px - sep for px, sep in covering)
-        return None
+        # Недостижимо: каждый шаг перепрыгивает хотя бы одну запись, поэтому
+        # шагов не может быть больше len(occupied). Оставлено как защита от
+        # бесконечного цикла при неожиданных значениях координат.
+        return None  # pragma: no cover
 
     def seat(
         self,
@@ -378,6 +387,10 @@ def layout(state: dict[str, Any], GAPX: float = GAP_MIN) -> D:
             ports[(b.id, 'bottom')].append((port, 'x', b.x + b.w * (i + 1) / (len(sigs) + 1), (pos - 0.4, pos + 0.6)))
     for (bid, _edge), ps in ports.items():
         b = blk[bid]
+        if len(ps) > MAX_PORTS_PER_EDGE:
+            # При большем числе портов шаг на грани BW меньше 0.3 px: линии
+            # сливаются. Сообщаем об этом сразу, а не после поиска координат.
+            raise ValueError('Недостаточно места для портов блока')
         ps.sort(key=lambda q: q[2])
         step = (
             BW / (len(ps) + 1)

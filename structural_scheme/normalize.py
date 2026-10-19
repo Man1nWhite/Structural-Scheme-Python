@@ -16,7 +16,7 @@ from .constants import (
     KVM_PANEL_ID,
     PROJECT_DEFAULTS,
 )
-from .text_utils import D, clampPerRow, fit, pad2, uid
+from .text_utils import D, clampPerRow, clean_text, fit, pad2, uid
 
 
 def _new(state: dict[str, Any], key: str, name: str) -> dict[str, Any]:
@@ -75,6 +75,14 @@ def createDefaultState() -> dict[str, Any]:
     return s
 
 
+def _finite(v: Any) -> bool:
+    """Конечное число; очень большой int (например, из JSON) не роняет float()."""
+    try:
+        return math.isfinite(v)
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
 def _pick(src: Any, defaults: dict[str, Any]) -> dict[str, Any]:
     out = deepcopy(defaults)
     if not isinstance(src, dict):
@@ -88,12 +96,14 @@ def _pick(src: Any, defaults: dict[str, Any]) -> dict[str, Any]:
             if d is None
             else type(v) is bool
             if type(d) is bool
-            else (isinstance(v, str) or type(v) in (int, float) and math.isfinite(v))
+            else (isinstance(v, str) or type(v) in (int, float) and _finite(v))
             if type(d) in (int, float)
             else isinstance(v, str)
         )
         if ok:
-            out[k] = v
+            # Числа в char-полях (например, servers='3') остаются как есть,
+            # строки очищаются от символов, ломающих XML/SVG/Draw.io.
+            out[k] = clean_text(v) if isinstance(v, str) else v
     return out
 
 
@@ -178,7 +188,7 @@ def blockLines(b: D, state: dict[str, Any]) -> list[str]:
         for f, label in [('fw', 'Межсетевых экранов'), ('cross', 'Опт. кроссов')]:
             try:
                 positive = float(it[f]) > 0
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):
                 positive = False
             if positive:
                 lines.append(f'{label}: {it[f]}')
@@ -195,7 +205,7 @@ def countWarnings(state: dict[str, Any]) -> list[str]:
                 try:
                     value = float(it[f])
                     bad = not math.isfinite(value) or value < 0
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, OverflowError):
                     bad = True
                 if bad:
                     out.append(

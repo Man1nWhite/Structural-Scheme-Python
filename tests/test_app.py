@@ -126,3 +126,19 @@ def test_cli(tmp_path):
     r = subprocess.run([sys.executable,'generate.py',str(project),'-o',str(tmp_path/'warn.svg')],capture_output=True)
     assert r.returncode == 0
     assert 'Предупреждение' in r.stderr.decode('utf-8')
+
+
+def test_hostile_json_values_do_not_return_500():
+    """Огромные int и одиночные суррогаты — валидный JSON, но не валидный проект."""
+    bodies = [
+        '{"racks":[{"id":"r0","servers":%s}]}' % ('9' * 400),
+        '{"format":"structural-scheme","version":1,"project":{"title":"A\\ud800B","blocksPerRow":%s}}' % ('9' * 400),
+        '{"format":"structural-scheme","version":1,"project":{"title":"A\\u0000B"},"racks":[{"id":"r","name":"N\\u0001"}]}',
+    ]
+    for body in bodies:
+        r = client.post('/api/preview', content=body, headers={'content-type': 'application/json'})
+        assert r.status_code == 200, body[:80]
+        ET.fromstring(r.json()['svg'])
+        r = client.post('/api/export/svg', content=body, headers={'content-type': 'application/json'})
+        assert r.status_code == 200
+        ET.fromstring(r.content)
