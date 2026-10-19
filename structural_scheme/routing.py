@@ -11,7 +11,6 @@ from itertools import pairwise
 from typing import Any
 
 from .constants import (
-    AUTO_H,
     BW,
     COLORS,
     EXIT_STEP,
@@ -29,10 +28,7 @@ from .constants import (
     MAX_WARNINGS,
     NAME_BY_COLOR,
     NAME_SIZE,
-    NET_H,
-    OP_H,
     PORT_WARN_STEP,
-    RACK_H,
     ROOM_LABEL_SIZE,
     SIG_H,
     SIG_LEN,
@@ -51,14 +47,17 @@ def routeBand(hs: Sequence[dict[str, Any]]) -> int:
     for h in hs:
         h['track'] = -1
     above: list[set[int]] = [set() for _ in hs]
+    below: list[set[int]] = [set() for _ in hs]
     for i, a in enumerate(hs):
         for j, b in enumerate(hs):
             if i == j:
                 continue
             if any(a['x1'] < x < a['x2'] for x in b['top']):
                 above[i].add(j)
+                below[j].add(i)
             if any(a['x1'] < x < a['x2'] for x in b['bot']):
                 above[j].add(i)
+                below[i].add(j)
     # Порядок обхода — по (число незанятых соседей выше, ширина, индекс).
     # Счётчики обновляются инкрементально: прежний min(len(above[i] & left))
     # на каждом шаге делал раскладку квадратичной.
@@ -75,7 +74,7 @@ def routeBand(hs: Sequence[dict[str, Any]]) -> int:
             heapq.heappop(heap)
         heapq.heappop(heap)
         left.discard(i)
-        for j in above[i]:
+        for j in below[i]:
             if j in left:
                 deg[j] -= 1
                 heapq.heappush(heap, (deg[j], hs[j]['x2'] - hs[j]['x1'], j))
@@ -97,21 +96,47 @@ def assign_gap_slots(runs: Sequence[dict[str, Any]]) -> int:
     Интервалы замкнуты: касающиеся интервалы (hi == lo) получают разные слоты,
     поэтому освобождение слотов проверяет строгое неравенство active[0][0] < r['lo'].
     Сортировка по началу + очередь окончаний, не эвристика по длине.
+    Внутри каждой связной компоненты слоты упорядочиваются так, чтобы подходы
+    слева лежали левее подходов справа, а короткие обходы — ближе к своему блоку.
     """
     active: list[tuple[float, int]] = []
     free: list[int] = []
     count = 0
+    comps: list[list[dict[str, Any]]] = []
+    comp: list[dict[str, Any]] = []
     for _i, r in sorted(enumerate(runs), key=lambda pair: (pair[1]['lo'], pair[1]['hi'], pair[0])):
         while active and active[0][0] < r['lo']:
             _, slot = heapq.heappop(active)
             heapq.heappush(free, slot)
+        if not active and comp:
+            comps.append(comp)
+            comp = []
         if free:
             slot = heapq.heappop(free)
         else:
             slot = count
             count += 1
         r['slot'] = slot
+        comp.append(r)
         heapq.heappush(active, (r['hi'], slot))
+    if comp:
+        comps.append(comp)
+    for group in comps:
+        by_slot: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        for r in group:
+            by_slot[r['slot']].append(r)
+        ordered = sorted(
+            by_slot,
+            key=lambda s: min(
+                (0, float(r['hi'] - r['lo']), float(r.get('px', 0.0)))
+                if r.get('side', 'L') == 'L'
+                else (1, -float(r['hi'] - r['lo']), float(r.get('px', 0.0)))
+                for r in by_slot[s]
+            ),
+        )
+        remap = {old: new for new, old in enumerate(ordered)}
+        for r in group:
+            r['slot'] = remap[r['slot']]
     return count
 
 
@@ -251,6 +276,11 @@ def _track_y(b: D, t: int) -> float:
     return float(b.y + b.reserved + b.pad + t * LSTEP)
 
 
+def _block_height(b: D, state: dict[str, Any]) -> int:
+    """Высота ячейки по фактическому числу строк описания (без пустого запаса)."""
+    return 36 + 16 * len(blockLines(b, state))
+
+
 def layout(state: dict[str, Any], GAPX: float = GAP_MIN) -> D:
     p = state['project']
     resolve = makeResolvers(state)
@@ -263,8 +293,9 @@ def layout(state: dict[str, Any], GAPX: float = GAP_MIN) -> D:
         rows, blocks = [], []
         for r, row in enumerate(raw):
             off = (cols - len(row)) // 2
-            bs = [
-                D(
+            bs = []
+            for c, it in enumerate(row):
+                b = D(
                     id=it['id'],
                     item=it,
                     kind=it['kind'],
@@ -272,12 +303,12 @@ def layout(state: dict[str, Any], GAPX: float = GAP_MIN) -> D:
                     row=r,
                     col=off + c,
                     w=BW,
-                    h={'item': OP_H, 'panel': OP_H, 'rack': RACK_H, 'net': NET_H, 'auto': AUTO_H}[it['kind']],
+                    h=0,
                     x=0,
                     y=0,
                 )
-                for c, it in enumerate(row)
-            ]
+                b.h = _block_height(b, state)
+                bs.append(b)
             rows.append(bs)
             blocks.extend(bs)
         return D(
@@ -374,13 +405,61 @@ def layout(state: dict[str, Any], GAPX: float = GAP_MIN) -> D:
         if i < 2:
             [C1, C2][i].pos = base - 2
 
+    def build_approach(c: D, source: bool, other_x: float) -> D:
+        b, _o, _edge, lvl, jog, _, _ = _approach_info(LV, c, source)
+        if jog is None:
+            return D(x=_cx(b), run=None, jog=None)
+        right = other_x >= _cx(b)
+        g = b.col + 1 if right else b.col
+        run = D(
+            g=g,
+            side='L' if right else 'R',
+            lo=min(jog.pos, c.band.pos) - 0.4,
+            hi=max(jog.pos, c.band.pos) + 0.4,
+            px=_cx(b) if source else other_x,
+            ax=lvl.startX + g * colStep - GAPX / 2,
+        )
+        lvl.gapRuns.setdefault(g, []).append(run)
+        return D(x=_cx(b), run=run, jog=jog)
+
+    for c in conns:
+        c.sApp = build_approach(c, True, _cx(c.tgt))
+    for c in conns:
+        c.tApp = build_approach(c, False, _proxy(c.sApp))
+    needGap: float = GAP_MIN
+    physical_gaps: dict[float, list[D]] = defaultdict(list)
+    for lvl in levels:
+        for g, runs in lvl.gapRuns.items():
+            gl = lvl.startX + g * colStep - GAPX
+            physical_gaps[gl].extend(runs)
+    for gl, runs in physical_gaps.items():
+        count = assign_gap_slots(runs)
+        needGap = max(needGap, 2 * SLOT_M + (count - 1) * SLOT)
+        for run in runs:
+            run.ax = gl + SLOT_M + run.slot * SLOT
+
     registry = PortRegistry()
     seat = registry.seat
 
-    ports: dict[tuple[str, str], list[tuple[D, str, float, tuple[float, float]]]] = defaultdict(list)
+    ports: dict[tuple[str, str], list[tuple[D, str, tuple[float, ...], tuple[float, float]]]] = defaultdict(list)
     for c in conns:
-        ports[(c.src.id, c.sEdge)].append((c, 'sx', _cx(c.tgt), _approach_info(LV, c, True)[-2:]))
-        ports[(c.tgt.id, c.tEdge)].append((c, 'tx', _cx(c.src), _approach_info(LV, c, False)[-2:]))
+        s_lo, s_hi = _approach_info(LV, c, True)[-2:]
+        t_lo, t_hi = _approach_info(LV, c, False)[-2:]
+        s_span = s_hi - s_lo
+        s_key = (
+            1.0,
+            _cx(c.tgt),
+            s_span if _cx(c.tgt) < _cx(c.src) else -s_span,
+            _proxy(c.sApp) if c.sApp.run else _cx(c.tgt),
+        )
+        tc = _cx(c.tgt)
+        t_key = (
+            (0.0 if _cx(c.src) < tc else 2.0, -_cx(c.src), 0.0, 0.0)
+            if c.u
+            else (1.0, _proxy(c.tApp) if c.tApp.run else _proxy(c.sApp), _proxy(c.sApp), _cx(c.src))
+        )
+        ports[(c.src.id, c.sEdge)].append((c, 'sx', s_key, (s_lo, s_hi)))
+        ports[(c.tgt.id, c.tEdge)].append((c, 'tx', t_key, (t_lo, t_hi)))
     signalPorts: dict[tuple[str, int], D] = {}
     for b in LV.auto.blocks:
         sigs = signalsOf(b.item)
@@ -388,7 +467,8 @@ def layout(state: dict[str, Any], GAPX: float = GAP_MIN) -> D:
             port = D()
             signalPorts[(b.id, i)] = port
             pos = LV.auto.base + 4 * b.row + 3
-            ports[(b.id, 'bottom')].append((port, 'x', b.x + b.w * (i + 1) / (len(sigs) + 1), (pos - 0.4, pos + 0.6)))
+            sig_x = b.x + b.w * (i + 1) / (len(sigs) + 1)
+            ports[(b.id, 'bottom')].append((port, 'x', (1.0, sig_x, 0.0, 0.0), (pos - 0.4, pos + 0.6)))
     for (bid, _edge), ps in ports.items():
         b = blk[bid]
         if len(ps) > MAX_PORTS_PER_EDGE:
@@ -406,6 +486,9 @@ def layout(state: dict[str, Any], GAPX: float = GAP_MIN) -> D:
         for i, (c, field, _, (lo, hi)) in enumerate(ps):
             x = _cx(b) + (i - (len(ps) - 1) / 2) * step
             c[field] = seat(x, lo, hi, x - step * 0.4, x + step * 0.4, min(SLOT, step * 0.8))
+    for c in conns:
+        c.sApp.x = c.sx
+        c.tApp.x = c.tx
 
     # Порт сам по себе не ошибка, но слияние подписей и линий пользователь
     # должен видеть: при высоком fan-in шаг ограничен шириной блока.
@@ -419,34 +502,8 @@ def layout(state: dict[str, Any], GAPX: float = GAP_MIN) -> D:
                 'линии могут сливаться, добавьте блоки или разнесите цели'
             )
 
-    def build_approach(c: D, source: bool) -> D:
-        b, o, _edge, lvl, jog, _, _ = _approach_info(LV, c, source)
-        px = c.sx if source else c.tx
-        if jog is None:
-            return D(x=px, run=None, jog=None)
-        g = b.col + 1 if _cx(o) >= _cx(b) else b.col
-        run = D(
-            g=g,
-            lo=min(jog.pos, c.band.pos) - 0.4,
-            hi=max(jog.pos, c.band.pos) + 0.4,
-            px=px,
-            ax=_cx(b),
-        )
-        lvl.gapRuns.setdefault(g, []).append(run)
-        return D(x=px, run=run, jog=jog)
-
-    for c in conns:
-        c.sApp, c.tApp = build_approach(c, True), build_approach(c, False)
-    needGap: float = GAP_MIN
-    physical_gaps: dict[float, list[D]] = defaultdict(list)
-    for lvl in levels:
-        for g, runs in lvl.gapRuns.items():
-            gl = lvl.startX + g * colStep - GAPX
-            physical_gaps[gl].extend(runs)
     for gl, runs in physical_gaps.items():
-        count = assign_gap_slots(runs)
-        needGap = max(needGap, 2 * SLOT_M + (count - 1) * SLOT)
-        for run in sorted(runs, key=lambda r: (r.lo, r.hi)):
+        for run in sorted(runs, key=lambda r: (r.slot, r.lo, r.hi)):
             run.ax = seat(gl + SLOT_M + run.slot * SLOT, run.lo, run.hi, gl + SLOT_M)
             needGap = max(needGap, math.ceil(run.ax - gl + SLOT_M))
     for c in conns:

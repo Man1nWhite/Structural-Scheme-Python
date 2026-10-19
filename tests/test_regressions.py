@@ -275,3 +275,41 @@ def test_count_warning_value_is_truncated():
     warning = next(w for w in buildScheme(s)['warnings'] if '«Серверов»' in w)
     assert len(warning) < 160
     assert '…' in warning
+
+
+def test_block_height_adapts_to_line_count():
+    """Высота ячеек зависит от фактического числа строк описания, без пустого запаса."""
+    s = createDefaultState()
+    s['racks'].append({**newRack(s), 'ntp': False, 'kvm': False, 'ups': False})
+    s['netCabs'].append({**newNetCab(s), 'fw': 0, 'cross': 0, 'external': False, 'ups': False})
+    m = buildScheme(s)
+    assert layoutProblems(m) == []
+    by_id = {b['id']: b for b in m['blocks']}
+    for b in m['blocks']:
+        assert b['h'] == 36 + 16 * len(b['lines'])
+    # Стойка с 1 строкой ниже стойки с 4 строками; сетевой шкаф с 1 строкой ниже шкафа с 5 строками.
+    assert by_id[s['racks'][1]['id']]['h'] < by_id[s['racks'][0]['id']]['h']
+    assert by_id[s['netCabs'][1]['id']]['h'] < by_id[s['netCabs'][0]['id']]['h']
+
+
+def test_multi_row_fan_in_has_no_unnecessary_crossings():
+    """Многорядная схема с одним сетевым шкафом раскладывается без пересечений линий."""
+    from shapely.geometry import LineString
+
+    s = createDefaultState()
+    for _ in range(4):
+        s['opItems'].append(newOpItem(s))
+    for _ in range(6):
+        s['autoCabs'].append(newAutoCab(s))
+    for state in (createDefaultState(), s):
+        m = buildScheme(state)
+        assert layoutProblems(m) == []
+        lines = [LineString(c['pts']) for c in m['conns']]
+        crossings = sum(
+            1
+            for i, a in enumerate(lines)
+            for b in lines[i + 1 :]
+            if not a.intersection(b).is_empty
+        )
+        assert crossings == 0
+
