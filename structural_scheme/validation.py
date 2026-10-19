@@ -9,7 +9,15 @@ from typing import Any
 from shapely.geometry import LineString, box
 from shapely.strtree import STRtree
 
-from .constants import LINE_SIZE, NAME_SIZE, PORT_MIN_STEP
+from .constants import (
+    LINE_SIZE,
+    NAME_SIZE,
+    PORT_MIN_STEP,
+    ROOM_LABEL_SIZE,
+    SIGNAL_LABEL_SIZE,
+    SUBTITLE_SIZE,
+    TITLE_SIZE,
+)
 from .text_utils import textWidth
 
 TOL: float = 0.05
@@ -113,6 +121,24 @@ def layoutProblems(model: dict[str, Any]) -> list[str]:
         for s in lines:
             if textWidth(s, LINE_SIZE) > b['w'] - 16:
                 problems.append(f'Строка подписи блока {b["id"]} шире блока')
+    # Подписи вне блоков обрезаются по ширине листа: заголовки по центру,
+    # названия помещений — по рамке, подписи сигналов — вокруг своей стрелки.
+    title = model.get('title')
+    if title and textWidth(title, TITLE_SIZE, True) > model['width']:
+        problems.append('Заголовок схемы шире листа')
+    subtitle = model.get('subtitle')
+    if subtitle and textWidth(subtitle, SUBTITLE_SIZE) > model['width']:
+        problems.append('Подзаголовок схемы шире листа')
+    for r in model['rooms']:
+        name = r.get('name')
+        if name and textWidth(name, ROOM_LABEL_SIZE, True) > r['w'] - 28:
+            problems.append(f'Название помещения {r.get("id", "")} шире рамки помещения')
+    for s in model['signals']:
+        label = s.get('label')
+        if label:
+            half = textWidth(label, SIGNAL_LABEL_SIZE, True) / 2
+            if s['x'] - half < 0 or s['x'] + half > model['width']:
+                problems.append('Подпись сигнала выходит за лист')
     lg = model['legend']
     for it in lg['items']:
         if it['x'] + 100 > lg['x'] + lg['w']:
@@ -120,6 +146,10 @@ def layoutProblems(model: dict[str, Any]) -> list[str]:
     n = model['notes']
     if n and n['y'] + 20 + 16 * len(n['lines']) > model['height']:
         problems.append('Примечания выходят за лист')
+    if n:
+        for s in n['lines']:
+            if textWidth(s, LINE_SIZE) > model['width'] - n['x']:
+                problems.append('Строка примечаний шире листа')
     return problems
 
 

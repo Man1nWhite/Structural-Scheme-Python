@@ -208,8 +208,14 @@ def countWarnings(state: dict[str, Any]) -> list[str]:
                 except (TypeError, ValueError, OverflowError):
                     bad = True
                 if bad:
+                    # Значение может быть произвольно длинной строкой из JSON:
+                    # предупреждение уходит в статус редактора и ответ API,
+                    # поэтому repr обрезается, а не размножается целиком.
+                    shown = repr(it[f])
+                    if len(shown) > 42:
+                        shown = shown[:39] + '…'
                     out.append(
-                        f'{fit(it["name"], 24)}: «{FIELD_LABELS[f]}» = {it[f]!r} — '
+                        f'{fit(it["name"], 24)}: «{FIELD_LABELS[f]}» = {shown} — '
                         'ожидается неотрицательное число'
                     )
     return out

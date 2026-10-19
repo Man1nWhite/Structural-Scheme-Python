@@ -215,3 +215,63 @@ def test_registry_reports_exhausted_search_instead_of_merging_lines():
         reg.occupied.append((i * 0.01, 0.0, 10.0, 0.1))
     with pytest.raises(ValueError, match='Недостаточно места для портов блока'):
         reg.seat(0.5, 0.0, 10.0, 0.0, 1.0, 7.0)
+
+
+def wide_autos(n):
+    """Плотный многострочный проект шкафов: обходы всех строк идут в одни зазоры."""
+    s = normalizeState({})
+    s['project']['blocksPerRow'] = 12
+    s['netCabs'] = [{**ITEM_DEFAULTS['netCabs'], 'id': f'n{i}'} for i in range(10)]
+    s['autoCabs'] = [{**ITEM_DEFAULTS['autoCabs'], 'id': f'a{i}', 'netTarget': f'n{i % 10}',
+                      'rs485Cab': i > 0, 'rs485Target': f'a{i - 1}'} for i in range(n)]
+    return s
+
+
+def test_dense_project_above_api_limit_still_builds_in_core():
+    """Ядро и CLI лимита 500 не имеют: пролив обходов при стартовом зазоре
+    30 px не должен умирать с ошибкой «Недостаточно места для портов блока»."""
+    m = buildScheme(wide_autos(700))
+    assert len(m['blocks']) == 710
+    assert layoutProblems(m) == []
+
+
+def test_outer_labels_are_shortened_to_sheet():
+    s = createDefaultState()
+    s['project']['title'] = 'Название схемы ' * 30
+    s['project']['operatorName'] = 'Операторная ' * 30
+    s['project']['notesText'] = 'Примечание ' * 100
+    s['project']['showSignalCounts'] = True
+    s['autoCabs'][0]['diN'] = '9' * 500
+    m = buildScheme(s)
+    assert layoutProblems(m) == []
+    assert m['title'].endswith('…')
+    assert m['rooms'][0]['name'].endswith('…')
+    assert m['notes']['lines'][0].endswith('…')
+    assert m['signals'][0]['label'].endswith('…')
+    assert any('вне блоков' in w for w in m['warnings'])
+    # Валидатор ловит потерянную обрезку подписей вне блоков.
+    m['title'] = 'Я' * 5000
+    assert any('Заголовок схемы шире листа' in p for p in layoutProblems(m))
+    m = buildScheme(s)
+    m['rooms'][0]['name'] = 'Я' * 5000
+    assert any('шире рамки помещения' in p for p in layoutProblems(m))
+    m = buildScheme(s)
+    m['signals'][0]['label'] = 'X' * 500
+    assert any('Подпись сигнала выходит за лист' in p for p in layoutProblems(m))
+    m = buildScheme(s)
+    m['notes']['lines'] = ['Я' * 5000]
+    assert any('Строка примечаний шире листа' in p for p in layoutProblems(m))
+    m = buildScheme(s)
+    m['subtitle'] = 'Я' * 5000
+    assert any('Подзаголовок схемы шире листа' in p for p in layoutProblems(m))
+    m = buildScheme(s)
+    m['signals'][0]['label'] = ''
+    assert not any('Подпись сигнала' in p for p in layoutProblems(m))
+
+
+def test_count_warning_value_is_truncated():
+    s = createDefaultState()
+    s['racks'][0]['servers'] = 'x' * 5000
+    warning = next(w for w in buildScheme(s)['warnings'] if '«Серверов»' in w)
+    assert len(warning) < 160
+    assert '…' in warning

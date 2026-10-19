@@ -33,10 +33,14 @@ from .constants import (
     OP_H,
     PORT_WARN_STEP,
     RACK_H,
+    ROOM_LABEL_SIZE,
     SIG_H,
     SIG_LEN,
+    SIGNAL_LABEL_SIZE,
     SLOT,
     SLOT_M,
+    SUBTITLE_SIZE,
+    TITLE_SIZE,
 )
 from .normalize import blockLines, countWarnings, makeResolvers, normalizeState
 from .text_utils import D, clampPerRow, fileNameOf, fit, fitText, signalLabel, signalsOf
@@ -564,32 +568,43 @@ def buildScheme(state: dict[str, Any]) -> D:
     warnings = list(m.warnings)
     if shortened:
         warnings.append(f'Сокращено подписей, не помещающихся в блок: {shortened}')
-    warnings += countWarnings(state)
-    if len(warnings) > MAX_WARNINGS:
-        warnings = warnings[:MAX_WARNINGS] + [f'…и ещё предупреждений: {len(warnings) - MAX_WARNINGS}']
-    rooms = [
-        D(
-            id='lvl_' + lvl.key,
-            name=p[{'op': 'operatorName', 'srv': 'serverName', 'auto': 'autoName'}[lvl.key]],
-            fill=LEVEL_FILL[lvl.key],
-            x=MARGIN,
-            y=lvl.y,
-            w=m.width - 2 * MARGIN,
-            h=lvl.height,
+    # Подписи вне блоков (заголовки, помещения, сигналы, примечания) тоже не
+    # должны уезжать за лист: они обрезаются по его ширине, а не только имена
+    # блоков. Число таких сокращений пользователь видит отдельным пунктом.
+    shortened_outer = 0
+    title = fitText(p['title'], m.width - 36, TITLE_SIZE, True)
+    subtitle = fitText(p['subtitle'], m.width - 36, SUBTITLE_SIZE) if p['subtitle'] else ''
+    shortened_outer += (title != p['title']) + (subtitle != p['subtitle'])
+    rooms = []
+    for lvl in m.levels:
+        full_room = p[{'op': 'operatorName', 'srv': 'serverName', 'auto': 'autoName'}[lvl.key]]
+        room_name = fitText(full_room, m.width - 2 * MARGIN - 28, ROOM_LABEL_SIZE, True)
+        shortened_outer += room_name != full_room
+        rooms.append(
+            D(
+                id='lvl_' + lvl.key,
+                name=room_name,
+                fill=LEVEL_FILL[lvl.key],
+                x=MARGIN,
+                y=lvl.y,
+                w=m.width - 2 * MARGIN,
+                h=lvl.height,
+            )
         )
-        for lvl in m.levels
-    ]
     signals = []
     for b in m.LV.auto.blocks:
         sigs = signalsOf(b.item)
         for i, s in enumerate(sigs):
             x = m.signalPorts[(b.id, i)].x
+            full_label = signalLabel(s, p['showSignalCounts'])
+            label = fitText(full_label, 64, SIGNAL_LABEL_SIZE, True)
+            shortened_outer += label != full_label
             signals.append(
                 D(
                     block=b,
                     kind=s['k'],
                     color=COLORS[s['k']],
-                    label=signalLabel(s, p['showSignalCounts']),
+                    label=label,
                     exitX=(x - b.x) / b.w,
                     x=x,
                     y1=b.y + b.h,
@@ -618,7 +633,14 @@ def buildScheme(state: dict[str, Any]) -> D:
             for i, k in enumerate(names)
         ],
     )
-    lines = [s for s in p['notesText'].split('\n') if s] if p['showNotes'] else []
+    full_lines = [s for s in p['notesText'].split('\n') if s] if p['showNotes'] else []
+    lines = [fitText(s, m.width - 2 * MARGIN, LINE_SIZE) for s in full_lines]
+    shortened_outer += sum(1 for s, t in zip(lines, full_lines, strict=True) if s != t)
+    if shortened_outer:
+        warnings.append(f'Сокращено подписей вне блоков, не помещающихся на лист: {shortened_outer}')
+    warnings += countWarnings(state)
+    if len(warnings) > MAX_WARNINGS:
+        warnings = warnings[:MAX_WARNINGS] + [f'…и ещё предупреждений: {len(warnings) - MAX_WARNINGS}']
     ny = legend.y + legend.h + 18
     notes = D(x=MARGIN, y=ny, lines=lines) if lines else None
     # Публичная модель не содержит внутренних полос и циклических ссылок.
@@ -629,8 +651,8 @@ def buildScheme(state: dict[str, Any]) -> D:
     return D(
         width=m.width,
         height=ny + (20 + 16 * len(lines) if lines else 0) + 24,
-        title=p['title'],
-        subtitle=p['subtitle'],
+        title=title,
+        subtitle=subtitle,
         fileName=fileNameOf(p),
         rooms=rooms,
         blocks=blocks,

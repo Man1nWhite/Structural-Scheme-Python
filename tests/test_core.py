@@ -179,3 +179,25 @@ def test_xml_invalid_characters_are_stripped_during_normalization():
     m = buildScheme(s)
     assert ET.fromstring(to_svg(m)).tag.endswith('svg')
     assert ET.fromstring(to_drawio(m)).tag == 'mxfile'
+
+
+def test_root_package_exports_full_public_api():
+    import structural_scheme as pkg
+
+    # Полный API исходного JS (core.js), а не только подмножество из README:
+    # всё обещанное есть в корне пакета и в __all__.
+    js_api = [
+        'COLORS', 'NAME_BY_COLOR', 'OP_TYPES', 'OP_LINKS', 'AUTO_UPLINKS', 'KVM_PANEL_ID',
+        'PROJECT_DEFAULTS', 'ITEM_DEFAULTS', 'FORMAT', 'FORMAT_VERSION', 'STORAGE_KEY',
+        'PER_ROW_MAX', 'RASTER_SCALE', 'RASTER_MAX_PIXELS',
+        'uid', 'fit', 'pad2', 'clampPerRow', 'rasterScale', 'signalLabel', 'signalsOf', 'fileNameOf',
+        'routeBand', 'createDefaultState', 'newOpItem', 'newRack', 'newNetCab', 'newAutoCab',
+        'serializeState', 'normalizeState', 'parseState', 'makeResolvers',
+        'buildScheme', 'toSvg', 'toDrawio',
+    ]
+    for name in js_api:
+        assert name in pkg.__all__, name
+        assert hasattr(pkg, name), name
+    assert all(hasattr(pkg, name) for name in pkg.__all__)
+    assert pkg.normalizeState is normalizeState
+    assert pkg.newOpItem is newOpItem

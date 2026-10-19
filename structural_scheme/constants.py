@@ -26,6 +26,10 @@ LEGEND_ITEM_W: int = 170  # ширина одной ячейки в блоке �
 # Размеры шрифта для оценки ширины текста (px)
 NAME_SIZE: int = 11
 LINE_SIZE: int = 10
+TITLE_SIZE: int = 18
+SUBTITLE_SIZE: int = 12
+ROOM_LABEL_SIZE: int = 12
+SIGNAL_LABEL_SIZE: int = 9
 
 # Ниже PORT_WARN_STEP порты одной грани визуально сближаются — выдаём предупреждение,
 # но не считаем геометрию ошибочной. Ниже PORT_MIN_STEP — ошибка слияния портов.
