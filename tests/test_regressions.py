@@ -179,3 +179,39 @@ def test_output_ports_keep_target_order():
         for key, pairs in edges.items():
             order = [tx for _, tx in sorted(pairs)]
             assert order == sorted(order), f'{key}: порядок целей нарушен'
+
+
+def test_registry_searches_past_512_occupied_slots():
+    """Обход длинного зазора обрывался после 512 шагов и давал ложную ошибку."""
+    reg = PortRegistry()
+    for i in range(600):
+        # Все записи конфликтуют по Y с искомым интервалом, но не между собой.
+        reg.occupied.append((i * SLOT, 0.0, 1.0, SLOT))
+    # Свободное место есть только после последней записи.
+    assert reg.seat(0.0, 0.0, 2.0, 0.0) >= 600 * SLOT
+
+
+def test_many_targets_to_one_net_cabinet_are_laid_out():
+    """481 блок на пределе веб-API: 480 целей в один сетевой шкаф.
+
+    Прежний предел поиска свободной координаты (512 шагов) ронял такую
+    раскладку с «Недостаточно места для портов блока», хотя физический
+    предел грани (559 портов) не достигнут.
+    """
+    s = normalizeState({})
+    s['project']['blocksPerRow'] = 8
+    s['netCabs'] = [{**ITEM_DEFAULTS['netCabs'], 'id': 'n0'}]
+    s['opItems'] = [{**ITEM_DEFAULTS['opItems'], 'id': f'o{i}', 'target': 'n0'} for i in range(480)]
+    m = buildScheme(s)
+    assert len(m['blocks']) == 481
+    assert any('Шаг портов' in w for w in m['warnings'])
+    assert layoutProblems(m) == []
+
+
+def test_registry_reports_exhausted_search_instead_of_merging_lines():
+    """Когда в окне между границами места нет, остаётся понятная ошибка."""
+    reg = PortRegistry()
+    for i in range(301):
+        reg.occupied.append((i * 0.01, 0.0, 10.0, 0.1))
+    with pytest.raises(ValueError, match='Недостаточно места для портов блока'):
+        reg.seat(0.5, 0.0, 10.0, 0.0, 1.0, 7.0)

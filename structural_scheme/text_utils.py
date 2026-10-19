@@ -109,6 +109,18 @@ def fit(s: Any, n: int) -> str:
     return s[: n - 1] + '…' if len(s) > n else s
 
 
+# Символы, недопустимые в XML 1.0: управляющие (кроме табуляции и переводов
+# строки), одиночные суррогаты и два не-символа. ElementTree сериализует их без
+# ошибки, но получается битый SVG/Draw.io; JSON с одиночным суррогатом ронял
+# сериализацию ответа API. Чистим при нормализации, до раскладки и рендера.
+XML_INVALID = re.compile('[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]')
+
+
+def clean_text(value: Any) -> str:
+    """Строка без символов, недопустимых в XML 1.0 (без изменения остального)."""
+    return XML_INVALID.sub('', str(value))
+
+
 def textWidth(value: Any, size: float, bold: bool = False) -> float:
     """Оценка ширины строки в px без шрифтовых библиотек (Arial / DejaVu Sans).
 

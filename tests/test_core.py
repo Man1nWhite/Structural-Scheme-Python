@@ -136,3 +136,46 @@ def test_build_scheme_gap_failure_guards(monkeypatch):
     with pytest.raises(ValueError, match='Не удалось подобрать ширину каналов'):
         routing.buildScheme(s)
 
+
+
+def test_public_api_exposes_documented_core_functions():
+    """README обещает API оригинала; функции должны быть в корне пакета."""
+    import structural_scheme as package
+
+    for name in [
+        'normalizeState', 'normalize_state', 'parseState', 'serializeState', 'makeResolvers',
+        'routeBand', 'rasterScale', 'newOpItem', 'newRack', 'newNetCab', 'newAutoCab',
+    ]:
+        assert callable(getattr(package, name)), name
+    assert package.normalizeState({'project': {'title': 'T'}})['project']['title'] == 'T'
+
+
+def test_huge_integers_fall_back_to_defaults_instead_of_crashing():
+    """JSON позволяет целые любой длины; math.isfinite(int) бросал OverflowError."""
+    huge = 10 ** 400
+    s = normalizeState({
+        'project': {'blocksPerRow': huge},
+        'racks': [{'id': 'r0', 'servers': huge}],
+        'autoCabs': [{'id': 'a0', 'ctrls': huge}],
+    })
+    assert s['project']['blocksPerRow'] == PROJECT_DEFAULTS['blocksPerRow']
+    assert s['racks'][0]['servers'] == ITEM_DEFAULTS['racks']['servers']
+    assert s['autoCabs'][0]['ctrls'] == ITEM_DEFAULTS['autoCabs']['ctrls']
+    # Публичная проверка числовых полей тоже не должна падать.
+    warnings = countWarnings({'racks': [{'name': 'N', 'servers': huge}], 'netCabs': [], 'autoCabs': []})
+    assert warnings and 'Серверов' in warnings[0]
+
+
+def test_xml_invalid_characters_are_stripped_during_normalization():
+    """NUL/одиночные суррогаты ломали SVG/Draw.io и сериализацию ответа API."""
+    s = parseState(
+        '{"format":"structural-scheme","version":1,'
+        '"project":{"title":"A\\u0000B\\ud800C\\u001fD"},'
+        '"racks":[{"id":"r\\u0000","name":"N\\u0001"}]}'
+    )
+    assert s['project']['title'] == 'ABCD'
+    assert s['racks'][0]['id'] == 'r'
+    assert s['racks'][0]['name'] == 'N'
+    m = buildScheme(s)
+    assert ET.fromstring(to_svg(m)).tag.endswith('svg')
+    assert ET.fromstring(to_drawio(m)).tag == 'mxfile'
