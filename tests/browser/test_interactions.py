@@ -296,6 +296,8 @@ def test_narrow_viewport_remains_editable(page, live_url):
 def test_quick_start_presets_are_one_click(page, live_url):
     """Шаблон проекта загружается одним кликом, «Отменить» возвращает прежний проект."""
     start(page, live_url)
+    # Оверлей перетаскивания скрыт, пока файл не тащат в окно.
+    expect(page.locator('#dropzone')).to_be_hidden()
     preset = page.get_by_role('button', name='Типовая АСУ ТП', exact=True)
     expect(preset).to_be_visible()
     preview_change(page, lambda: preset.click())
@@ -340,7 +342,8 @@ def test_duplicate_item_is_one_click(page, live_url):
     expect(page.locator('.card')).to_have_count(4)
     preview_change(page, lambda: page.locator('.card').first.get_by_role('button', name='Дублировать', exact=True).click())
     expect(page.locator('.card')).to_have_count(5)
-    names = page.locator('input[aria-label="Название"]').all_input_values()
-    assert names[1] == names[0] + ' (копия)'
+    cards = page.locator('.card')
+    name = cards.nth(0).get_by_label('Название', exact=True).input_value()
+    assert cards.nth(1).get_by_label('Название', exact=True).input_value() == name + ' (копия)'
     ids = [item['id'] for item in saved_state(page)['opItems']]
     assert len(ids) == len(set(ids)) == 5

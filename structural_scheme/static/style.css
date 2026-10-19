@@ -473,6 +473,8 @@ input[type=checkbox] {
   place-items: center;
   pointer-events: none;
 }
+/* Атрибут hidden не срабатывает сам по себе, когда CSS задаёт display. */
+#dropzone[hidden] { display: none; }
 #dropzone > div {
   background: #fff;
   color: var(--accent);
