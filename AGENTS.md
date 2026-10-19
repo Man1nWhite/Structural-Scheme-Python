@@ -12,8 +12,8 @@
 - `structural_scheme/export.py`: векторный экспорт и растры через resvg/Pillow, без браузера и системного Cairo; `export_bundle` собирает ZIP со всеми форматами и JSON проекта.
 - `structural_scheme/validation.py`: Shapely/STRtree, инварианты из оригинального helpers.js.
 - `structural_scheme/app.py` + `static/`: FastAPI + vanilla JS/CSS, локальные ресурсы,
-  относительные HTTP URL. UI рассчитан на «один клик»: шаблоны быстрого старта,
-  отмена/повтор действий, дублирование блоков, перетаскивание JSON, экспорт ZIP.
+  относительные HTTP URL. UI — компактные вкладки, предпросмотр и экспорт без
+  верхней панели шаблонов; шаблоны быстрого старта и ZIP доступны через API/CLI.
   Browser-тесты держатся на селекторах `#preview`, `#status`, `#error`, `#file`,
   `#zoom`, классах `.card`/`.items` и точных именах кнопок/подписей полей —
   не переименовывайте их без обновления `tests/browser/`. Устанавливается только пакет `structural_scheme`; файл `app.py`
