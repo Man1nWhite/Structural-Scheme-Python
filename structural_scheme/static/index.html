@@ -1,10 +1,81 @@
 <!doctype html>
 <html lang="ru">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Структурная схема · АСУ ТП</title><link rel="stylesheet" href="/static/style.css"><script defer src="/static/app.js"></script></head>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Структурная схема · АСУ ТП</title>
+<link rel="stylesheet" href="/static/style.css">
+<script defer src="/static/app.js"></script>
+</head>
 <body>
-<header><div class="brand">▦</div><div><h1>Структурная схема</h1><p>АСУ ТП · Локальный редактор</p></div><span class="offline">● Без облака</span></header>
+<header>
+  <div class="brand" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="8.5" y="14" width="7" height="7" rx="1.5"/><path d="M6.5 10v2h11v-2M12 12v2"/></svg>
+  </div>
+  <div class="brand-text">
+    <h1>Структурная схема</h1>
+    <p>АСУ ТП · Локальный редактор — предпросмотр и экспорт в один клик</p>
+  </div>
+  <div class="badges">
+    <span class="badge ok">● Без облака</span>
+    <span class="badge">Автосохранение</span>
+  </div>
+</header>
+
 <main>
-<section class="editor"><nav id="tabs" aria-label="Разделы проекта"></nav><div class="actions"><button id="save">Сохранить проект</button><button id="open">Открыть JSON</button><button id="reset" class="quiet">Начать заново</button><input type="file" id="file" accept=".json,application/json" hidden></div><div id="fields"></div></section>
-<section class="drawing"><div class="toolbar"><div><h2>Предпросмотр</h2><span id="status" role="status">Загрузка…</span></div><div class="exports"><button data-format="svg">⬇ SVG</button><button data-format="png">⬇ PNG</button><button data-format="jpg">⬇ JPG</button><button data-format="drawio">⬇ Draw.io</button></div><label class="zoom">Масштаб <select id="zoom"><option value="fit">По ширине</option><option value=".5">50%</option><option value="1">100%</option><option value="2">200%</option></select></label></div><div id="error" role="alert" hidden></div><div id="preview" aria-label="Схема"></div></section>
-</main><footer>Python · Единая модель SVG / PNG / JPG / Draw.io · Все данные остаются на вашем компьютере</footer>
-</body></html>
+  <section class="quickstart" aria-labelledby="quick-h">
+    <div class="quick-head">
+      <h2 id="quick-h">Быстрый старт</h2>
+      <p>Один клик — готовый проект целиком. Дальше правьте любые поля: схема пересобирается сразу.</p>
+    </div>
+    <div class="presets" id="presets" role="group" aria-label="Шаблоны проектов"></div>
+    <p class="drop-hint">Или просто перетащите файл проекта <b>.json</b> в это окно — ничего нажимать не нужно</p>
+  </section>
+
+  <div class="workspace">
+    <section class="editor">
+      <div class="actions">
+        <button id="save">Сохранить проект</button>
+        <button id="open">Открыть JSON</button>
+        <input type="file" id="file" accept=".json,application/json" hidden>
+        <button id="undo" class="quiet" title="Вернуть состояние до последнего действия" disabled>Отменить</button>
+        <button id="redo" class="quiet" title="Снова применить отменённое действие" disabled>Вернуть</button>
+        <button id="reset" class="quiet">Начать заново</button>
+      </div>
+      <nav id="tabs" aria-label="Разделы проекта"></nav>
+      <div id="fields"></div>
+    </section>
+
+    <section class="drawing">
+      <div class="toolbar">
+        <div class="toolbar-title">
+          <h2>Предпросмотр</h2>
+          <span id="status" role="status">Загрузка…</span>
+        </div>
+        <div class="exports">
+          <button data-format="svg">⬇ SVG</button>
+          <button data-format="png">⬇ PNG</button>
+          <button data-format="jpg">⬇ JPG</button>
+          <button data-format="drawio">⬇ Draw.io</button>
+          <button data-format="all" class="hero">⬇ Всё (ZIP)</button>
+        </div>
+        <label class="zoom">Масштаб
+          <select id="zoom">
+            <option value="fit">По ширине</option>
+            <option value=".5">50%</option>
+            <option value="1">100%</option>
+            <option value="2">200%</option>
+          </select>
+        </label>
+      </div>
+      <div id="error" role="alert" hidden></div>
+      <div id="preview" aria-label="Схема"></div>
+    </section>
+  </div>
+</main>
+
+<footer>Python · Единая модель SVG / PNG / JPG / Draw.io · Все данные остаются на вашем компьютере</footer>
+<div id="toast" hidden aria-live="polite"></div>
+<div id="dropzone" hidden aria-hidden="true"><div>Отпустите файл .json — проект откроется</div></div>
+</body>
+</html>

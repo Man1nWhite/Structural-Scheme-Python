@@ -75,6 +75,88 @@ def createDefaultState() -> dict[str, Any]:
     return s
 
 
+# Готовые проекты для «быстрого старта» веб-интерфейса: один клик — рабочая схема.
+# id → (заголовок кнопки, подсказка). Порядок словаря — порядок показа в интерфейсе.
+PRESET_META: dict[str, tuple[str, str]] = {
+    'demo': ('Демонстрационный проект', 'Готовый пример: 4 устройства, стойка, сетевой шкаф и три шкафа автоматики'),
+    'typical': ('Типовая АСУ ТП', 'KVM-щит, две стойки, два сетевых шкафа и три шкафа ША с RS-485'),
+    'minimal': ('Минимальный проект', 'Одно АРМ, стойка, сетевой шкаф и один шкаф автоматики'),
+    'empty': ('Пустой проект', 'Только названия помещений — соберите схему с нуля'),
+}
+
+
+def createPresetState(kind: str) -> dict[str, Any]:
+    """Готовый проект шаблона `kind` (см. PRESET_META); неизвестный шаблон — ValueError."""
+    if kind not in PRESET_META:
+        raise ValueError('Неизвестный шаблон проекта.')
+    if kind == 'demo':
+        return createDefaultState()
+    s: dict[str, Any] = {'project': deepcopy(PROJECT_DEFAULTS), **{k: [] for k in ITEM_DEFAULTS}}
+    if kind == 'empty':
+        s['project'].update(title='Новый проект', subtitle='Структурная схема АСУ ТП', fileName='new_scheme')
+        return s
+    net = newNetCab(s)
+    if kind == 'minimal':
+        net.update(switches=2, fw=1, cross=1, external=True)
+    else:
+        net.update(switches=3, fw=1, cross=2, external=True)
+    s['netCabs'].append(net)
+    if kind == 'typical':
+        second = newNetCab(s)
+        second.update(switches=2, fw=0, cross=2, external=False)
+        s['netCabs'].append(second)
+    op = newOpItem(s)
+    op.update(name='АРМ оператора №1', type='АРМ', kvmToPanel=kind == 'typical')
+    s['opItems'].append(op)
+    rack = newRack(s)
+    rack.update(servers=2 if kind == 'minimal' else 4, kvm=True, ntp=True, ups=True)
+    s['racks'].append(rack)
+    if kind == 'typical':
+        for name, type_, link, kvm in [
+            ('АРМ оператора №2', 'АРМ', 'Витая пара', True),
+            ('АРМ технолога', 'АРМ', 'Оптика', False),
+            ('Принтер сетевой', 'Принтер', 'Витая пара', False),
+            ('Панель управления', 'Панель управления', 'Витая пара', False),
+        ]:
+            it = newOpItem(s)
+            it.update(name=name, type=type_, link=link, kvmToPanel=kvm)
+            s['opItems'].append(it)
+        rack2 = newRack(s)
+        rack2.update(name='Серверная стойка №2', servers=2, kvm=True, ntp=False, ups=True)
+        rack2['netTarget'] = s['netCabs'][1]['id']
+        s['racks'].append(rack2)
+    auto = newAutoCab(s)
+    auto.update(ctrls=2 if kind == 'typical' else 1, rs485=True, diN=32 if kind == 'typical' else 16,
+                doN=32 if kind == 'typical' else 8, aiN=16 if kind == 'typical' else 8,
+                aoN=2 if kind == 'typical' else 0, ao=kind == 'typical')
+    s['autoCabs'].append(auto)
+    if kind == 'typical':
+        for step, ctrls in enumerate([1, 1], start=2):
+            it = newAutoCab(s)
+            it.update(ctrls=ctrls, rs485=True, ao=step == 2, diN=32, doN=32, aiN=16, aoN=2 if step == 2 else 0)
+            it['rs485Cab'] = True
+            it['rs485Target'] = s['autoCabs'][-1]['id']
+            if step == 3:
+                it['netTarget'] = s['netCabs'][1]['id']
+            s['autoCabs'].append(it)
+        s['project'].update(
+            title='Структурная схема АСУ ТП',
+            subtitle='Автоматизированная система управления технологическим процессом',
+            fileName='asu_tp_scheme',
+            kvmPanel=True,
+            showSignalCounts=True,
+        )
+    return s
+
+
+def listPresets() -> list[dict[str, Any]]:
+    """Шаблоны для веб-интерфейса: id, заголовок, подсказка и готовое состояние."""
+    return [
+        {'id': kind, 'title': meta[0], 'hint': meta[1], 'state': createPresetState(kind)}
+        for kind, meta in PRESET_META.items()
+    ]
+
+
 def _finite(v: Any) -> bool:
     """Конечное число; очень большой int (например, из JSON) не роняет float()."""
     try:
@@ -222,6 +304,8 @@ def countWarnings(state: dict[str, Any]) -> list[str]:
 
 
 create_default_state = createDefaultState
+create_preset_state = createPresetState
+list_presets = listPresets
 normalize_state = normalizeState
 serialize_state = serializeState
 parse_state = parseState

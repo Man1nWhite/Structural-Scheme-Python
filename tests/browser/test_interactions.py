@@ -1,6 +1,7 @@
 """Пользовательские сценарии в реальном браузере, без Node-проекта и моков DOM."""
 import contextlib
 import json
+import zipfile
 from io import BytesIO
 from xml.etree import ElementTree as ET
 
@@ -290,3 +291,56 @@ def test_narrow_viewport_remains_editable(page, live_url):
     expect(page.locator('.card')).to_have_count(4)
     expect(page.locator('#preview svg')).to_contain_text('Мобильный проект')
     assert page.locator('#preview svg').evaluate('(s) => s.getBoundingClientRect().width <= s.parentElement.clientWidth')
+
+
+def test_quick_start_presets_are_one_click(page, live_url):
+    """Шаблон проекта загружается одним кликом, «Отменить» возвращает прежний проект."""
+    start(page, live_url)
+    preset = page.get_by_role('button', name='Типовая АСУ ТП', exact=True)
+    expect(preset).to_be_visible()
+    preview_change(page, lambda: preset.click())
+    expect(page.locator('#preview svg')).to_contain_text('Структурная схема АСУ ТП')
+    assert saved_state(page)['project']['title'] == 'Структурная схема АСУ ТП'
+    assert len(saved_state(page)['autoCabs']) == 3
+
+    empty = page.get_by_role('button', name='Пустой проект', exact=True)
+    preview_change(page, lambda: empty.click())
+    assert saved_state(page)['project']['title'] == 'Новый проект'
+    tab(page, 'Операторная')
+    expect(page.locator('.card')).to_have_count(0)
+    expect(page.locator('.empty-hint')).to_be_visible()
+
+    preview_change(page, lambda: page.get_by_role('button', name='Отменить', exact=True).click())
+    assert saved_state(page)['project']['title'] == 'Структурная схема АСУ ТП'
+    expect(page.locator('.card')).to_have_count(5)
+    expect(page.get_by_role('alert')).to_be_hidden()
+
+
+def test_one_click_export_all_downloads_zip(page, live_url, tmp_path):
+    start(page, live_url)
+    preview_change(page, lambda: page.get_by_label('Имя выходных файлов').fill('bundle_export'))
+    path = download(page, '⬇ Всё (ZIP)', tmp_path)
+    assert path.name == 'bundle_export.zip'
+    with zipfile.ZipFile(path) as archive:
+        assert sorted(archive.namelist()) == [
+            'bundle_export.drawio', 'bundle_export.jpg', 'bundle_export.json', 'bundle_export.png', 'bundle_export.svg',
+        ]
+        assert ET.fromstring(archive.read('bundle_export.svg')).tag.endswith('svg')
+        assert ET.fromstring(archive.read('bundle_export.drawio')).tag == 'mxfile'
+        assert json.loads(archive.read('bundle_export.json'))['format'] == 'structural-scheme'
+        with Image.open(BytesIO(archive.read('bundle_export.png'))) as image:
+            assert image.format == 'PNG'
+    expect(page.get_by_role('alert')).to_be_hidden()
+    expect(page.get_by_role('button', name='⬇ Всё (ZIP)', exact=True)).to_be_enabled()
+
+
+def test_duplicate_item_is_one_click(page, live_url):
+    start(page, live_url)
+    tab(page, 'Операторная')
+    expect(page.locator('.card')).to_have_count(4)
+    preview_change(page, lambda: page.locator('.card').first.get_by_role('button', name='Дублировать', exact=True).click())
+    expect(page.locator('.card')).to_have_count(5)
+    names = page.locator('input[aria-label="Название"]').all_input_values()
+    assert names[1] == names[0] + ' (копия)'
+    ids = [item['id'] for item in saved_state(page)['opItems']]
+    assert len(ids) == len(set(ids)) == 5
